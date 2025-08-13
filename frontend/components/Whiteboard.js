@@ -18,7 +18,7 @@ export default function Whiteboard() {
 
   useEffect(() => {
     // Initialize socket connection
-    const newSocket = io('http://localhost:5000', {
+    const newSocket = io('https://rtwhiteboardrk.onrender.com', {
       transports: ['websocket', 'polling']
     });
     setSocket(newSocket);
