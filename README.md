@@ -31,11 +31,11 @@ This app supports freehand drawing, erasing, color selection, and shape tools, a
 ---
 
 ## 📂 Project Structure
-project-root/
+-**project-root/
 │── backend/ # Express.js server & WebSocket logic
 │── components/ # React components (Whiteboard, Toolbar, etc.)
 │── pages/ # Next.js pages
 │── public/ # Static assets
 │── styles/ # Global styles
-│── package.json # Dependencies & scripts
+│── package.json # Dependencies & scripts**
 
