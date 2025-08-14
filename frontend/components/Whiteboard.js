@@ -420,7 +420,7 @@ useEffect(() => {
           </div>
         </div>
       </div>
-      <div className='text-color py-4 text-gray-500 text-sm'>
+      <div className='text-color pl-8 py-4 text-gray-500 text-sm'>
           created by Ranjeet Kumar
       </div>
 
