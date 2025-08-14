@@ -17,7 +17,7 @@ export default function Whiteboard() {
   const [cursorPos, setCursorPos] = useState({ x: null, y: null });
 
   useEffect(() => {
-    // Initialize socket connection
+    // Initialize karo socket connection ko
     const newSocket = io('https://rtwhiteboardrk.onrender.com', {
       transports: ['websocket', 'polling']
     });
@@ -89,7 +89,7 @@ export default function Whiteboard() {
     };
   }, []);
 
-  // Update brush color and size without resizing/clearing the canvas
+  // Update karo  brush color ko and size without resizing or clearing the canvas
 useEffect(() => {
   const canvas = canvasRef.current;
   if (!canvas) return;
@@ -104,10 +104,12 @@ useEffect(() => {
 
     const ctx = canvas.getContext('2d');
     
-    // Set canvas size to match display size
+    // Set canvas background size to match display size
     const rect = canvas.getBoundingClientRect();
     const isMobile = window.innerWidth < 768;
     
+
+    //mobile device ke liye 
     if (isMobile) {
       canvas.width = rect.width * window.devicePixelRatio;
       canvas.height = (window.innerHeight - 250) * window.devicePixelRatio;
@@ -219,7 +221,7 @@ useEffect(() => {
     ctx.lineTo(pos.x, pos.y);
     ctx.stroke();
     
-    // Send drawing data to server
+    // Send drawing data to server 
     if (socket && socket.connected) {
       const eventType = currentTool === 'eraser' ? 'erase' : 'draw';
       socket.emit(eventType, {
@@ -419,6 +421,9 @@ useEffect(() => {
             />
           </div>
         </div>
+      </div>
+      <div className='text-color py-4 text-gray-500 text-sm'>
+          created by Ranjeet Kumar
       </div>
 
       {/* Connection Status */}
