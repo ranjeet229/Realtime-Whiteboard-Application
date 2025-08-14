@@ -420,6 +420,9 @@ useEffect(() => {
           </div>
         </div>
       </div>
+      <div className='text-color py-4 text-gray-500 text-sm'>
+          created by Ranjeet Kumar
+      </div>
 
       {/* Connection Status */}
       {!isConnected && (
