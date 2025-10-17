@@ -145,7 +145,8 @@ export default function Whiteboard() {
     
     if (drawData.type === 'erase') {
       ctx.globalCompositeOperation = 'destination-out';
-      ctx.lineWidth = drawData.size * 2;
+      // Use eraserSize if available, otherwise fall back to size property
+      ctx.lineWidth = drawData.eraserSize !== undefined ? drawData.eraserSize : (drawData.size || 10);
     } else {
       ctx.globalCompositeOperation = 'source-over';
       ctx.strokeStyle = drawData.color;
@@ -187,7 +188,7 @@ export default function Whiteboard() {
     
     if (currentTool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
-      ctx.lineWidth = currentSize * 2;
+      ctx.lineWidth = eraserSize;
     } else {
       ctx.globalCompositeOperation = 'source-over';
       ctx.strokeStyle = currentColor;
@@ -218,7 +219,8 @@ export default function Whiteboard() {
         toX: pos.x,
         toY: pos.y,
         color: currentColor,
-        size: currentSize
+        size: currentSize,
+        eraserSize: eraserSize
       });
     }
     
@@ -321,18 +323,21 @@ export default function Whiteboard() {
             {/* Right Section: Size Slider */}
             <div className="flex items-center gap-3 px-4 py-2 bg-gray-50 rounded-lg">
               <span className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                Size:
+                {currentTool === 'pen' ? 'Pen Size:' : 'Eraser Size:'}
               </span>
               <input
                 type="range"
                 min="1"
                 max="50"
-                value={currentSize}
-                onChange={(e) => setCurrentSize(parseInt(e.target.value))}
+                value={currentTool === 'pen' ? currentSize : eraserSize}
+                onChange={(e) => currentTool === 'pen' 
+                  ? setCurrentSize(parseInt(e.target.value))
+                  : setEraserSize(parseInt(e.target.value))
+                }
                 className="w-32 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
               />
               <span className="text-sm font-semibold text-gray-700 w-10 text-center">
-                {currentSize}px
+                {currentTool === 'pen' ? currentSize : eraserSize}px
               </span>
             </div>
           </div>
@@ -386,12 +391,15 @@ export default function Whiteboard() {
                   type="range"
                   min="1"
                   max="50"
-                  value={currentSize}
-                  onChange={(e) => setCurrentSize(parseInt(e.target.value))}
+                  value={currentTool === 'pen' ? currentSize : eraserSize}
+                  onChange={(e) => currentTool === 'pen'
+                    ? setCurrentSize(parseInt(e.target.value))
+                    : setEraserSize(parseInt(e.target.value))
+                  }
                   className="w-20 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
                 />
                 <span className="text-xs font-semibold text-gray-700 w-8">
-                  {currentSize}
+                  {currentTool === 'pen' ? currentSize : eraserSize}
                 </span>
               </div>
             </div>
@@ -431,7 +439,7 @@ export default function Whiteboard() {
         <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-full shadow-2xl z-50 animate-pulse">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 bg-white rounded-full"></span>
-            <span className="text-sm font-medium">Reconnecting to server...</span>
+            <span className="text-sm font-medium">Reconnecting...</span>
           </div>
         </div>
       )}
