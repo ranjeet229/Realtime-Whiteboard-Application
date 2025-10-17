@@ -9,7 +9,7 @@ const server = http.createServer(app);
 
 const io = socketIo(server, {
   cors: {
-    origin: "*", // For full accessibility; restrict in real deployments!
+    origin: "*", // Adjust as needed!
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -20,7 +20,9 @@ app.use(express.json());
 
 let activeUsers = new Map(); // socketId -> userData
 let drawingHistory = {};     // roomId -> [events]
+let undoStacks = {};         // roomId -> [{ action: 'push'|'clear', event: ... }]
 
+// Helper
 function getRoomId(userData = {}) {
   return userData.roomType === 'private' && userData.passKey
     ? userData.passKey.trim()
@@ -28,9 +30,7 @@ function getRoomId(userData = {}) {
 }
 
 io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
-
-  // User joins a room
+  // ---- Whiteboard join logic -----
   socket.on('user_join', (userData) => {
     const roomId = getRoomId(userData);
     socket.join(roomId);
@@ -38,24 +38,20 @@ io.on('connection', (socket) => {
       id: socket.id,
       ...userData,
       roomId,
-      joinedAt: new Date()
+      joinedAt: new Date(),
+      username: userData.username || `User_${socket.id.substring(0, 6)}`
     });
 
+    // Drawing history init
     if (!drawingHistory[roomId]) drawingHistory[roomId] = [];
+    if (!undoStacks[roomId]) undoStacks[roomId] = [];
 
-    // Send only this room's history
+    // Send current state
     socket.emit('drawing_history', drawingHistory[roomId]);
-
-    // Only users in this room
-    const userCount = Array.from(activeUsers.values()).filter(u => u.roomId === roomId).length;
-    io.to(roomId).emit('user_count_update', userCount);
-
-    console.log(
-      `User ${userData.username || socket.id} joined [room: ${roomId}]. Users: ${userCount}`
-    );
+    io.to(roomId).emit('user_count_update', Array.from(activeUsers.values()).filter(u => u.roomId === roomId).length);
   });
 
-  // Draw
+  // ---- Drawing ----
   socket.on('draw', (drawData) => {
     const user = activeUsers.get(socket.id);
     if (!user) return;
@@ -64,18 +60,17 @@ io.on('connection', (socket) => {
       ...drawData,
       socketId: socket.id,
       timestamp: new Date(),
+      username: user.username || ''
     };
-    drawingHistory[roomId] = drawingHistory[roomId] || [];
     drawingHistory[roomId].push(drawingEvent);
-
-    // History limit
-    if (drawingHistory[roomId].length > 1000)
+    undoStacks[roomId].push({ action: 'push', event: drawingEvent });
+    if (drawingHistory[roomId].length > 1000) {
       drawingHistory[roomId] = drawingHistory[roomId].slice(-1000);
-
+    }
     socket.to(roomId).emit('remote_draw', drawingEvent);
   });
 
-  // Erase
+  // ---- Erase ----
   socket.on('erase', (eraseData) => {
     const user = activeUsers.get(socket.id);
     if (!user) return;
@@ -84,48 +79,76 @@ io.on('connection', (socket) => {
       ...eraseData,
       socketId: socket.id,
       timestamp: new Date(),
+      username: user.username || ''
     };
-    drawingHistory[roomId] = drawingHistory[roomId] || [];
     drawingHistory[roomId].push(eraseEvent);
-
-    if (drawingHistory[roomId].length > 1000)
+    undoStacks[roomId].push({ action: 'push', event: eraseEvent });
+    if (drawingHistory[roomId].length > 1000) {
       drawingHistory[roomId] = drawingHistory[roomId].slice(-1000);
-
+    }
     socket.to(roomId).emit('remote_erase', eraseEvent);
   });
 
-  // Clear
+  // ---- Clear Board ----
   socket.on('clear_board', () => {
     const user = activeUsers.get(socket.id);
     if (!user) return;
     const { roomId } = user;
+    undoStacks[roomId].push({ action: 'clear', events: [...drawingHistory[roomId]] });
     drawingHistory[roomId] = [];
     io.to(roomId).emit('board_cleared', { clearedBy: socket.id });
   });
 
-  // Cursor movement
-  socket.on('cursor_move', (cursorData) => {
+  // ---- Undo ----
+  socket.on('undo', () => {
     const user = activeUsers.get(socket.id);
     if (!user) return;
     const { roomId } = user;
-    socket.to(roomId).emit('remote_cursor', {
-      ...cursorData,
-      socketId: socket.id
+    if (!undoStacks[roomId] || undoStacks[roomId].length === 0) return;
+
+    // Pop off last item
+    let popped;
+    while (undoStacks[roomId].length > 0) {
+      const last = undoStacks[roomId].pop();
+      if (last.action === 'push') {
+        // Remove from end of drawingHistory
+        drawingHistory[roomId].pop();
+        popped = last;
+        break;
+      }
+      if (last.action === 'clear') {
+        // Restore cleared events
+        drawingHistory[roomId] = last.events || [];
+        popped = last;
+        break;
+      }
+    }
+    // Send new state to all users in the room
+    io.to(roomId).emit('drawing_history', drawingHistory[roomId]);
+  });
+
+  // ---- Redo ----
+  // (To keep it simple, skipping redo stack for this version. Can be added per room if needed.)
+
+  // ---- Chat ----
+  socket.on('chat_message', ({ name, text }) => {
+    const user = activeUsers.get(socket.id);
+    const roomId = user ? user.roomId : 'public';
+    io.to(roomId).emit('chat_message', {
+      name: name || (user && user.username) || 'User',
+      text,
+      timestamp: Date.now()
     });
   });
 
-  // Disconnect
+  // ---- Disconnect logic ----
   socket.on('disconnect', () => {
     const user = activeUsers.get(socket.id);
     if (user) {
       const { roomId } = user;
       activeUsers.delete(socket.id);
-      const userCount = Array.from(activeUsers.values()).filter(u => u.roomId === roomId).length;
-      io.to(roomId).emit('user_count_update', userCount);
+      io.to(roomId).emit('user_count_update', Array.from(activeUsers.values()).filter(u => u.roomId === roomId).length);
       socket.to(roomId).emit('user_disconnected', socket.id);
-      console.log(`User disconnected: ${socket.id} (room: ${roomId})`);
-    } else {
-      activeUsers.delete(socket.id);
     }
   });
 });
