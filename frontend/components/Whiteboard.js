@@ -12,20 +12,21 @@ export default function Whiteboard() {
   const [userCount, setUserCount] = useState(1);
   const [isConnected, setIsConnected] = useState(false);
   const [lastPos, setLastPos] = useState({ x: 0, y: 0 });
-  const [roomType, setRoomType] = useState('public'); 
+  const [roomType, setRoomType] = useState('public');
   const [passKey, setPassKey] = useState('');
+  const [generatedKey, setGeneratedKey] = useState('');
   const [isJoined, setIsJoined] = useState(false);
-  const [drawingShape, setDrawingShape] = useState('free'); 
+  const [drawingShape, setDrawingShape] = useState('free');
   const [eraserSize, setEraserSize] = useState(20);
   const [pencilType, setPencilType] = useState('solid');
   const colors = ['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'];
   const [startShapePos, setStartShapePos] = useState(null);
   const [tempCanvasImage, setTempCanvasImage] = useState(null);
 
-  // Socket Initialization and Handlers
+  // Socket IO
   useEffect(() => {
     if (!isJoined) return;
-    const newSocket = io('https://rtwhiteboardrk.onrender.com', {
+    const newSocket = io('http://localhost:5000', {
       transports: ['websocket', 'polling']
     });
     setSocket(newSocket);
@@ -68,33 +69,18 @@ export default function Whiteboard() {
     // eslint-disable-next-line
   }, [isJoined]);
 
-  // Brush color/size update
   useEffect(() => {
+    // No devicePixelRatio logic: align everything with CSS px
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    ctx.strokeStyle = currentColor;
-    ctx.lineWidth = currentSize;
-  }, [currentColor, currentSize]);
-
-  // Initial and resize setup
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
     const rect = canvas.getBoundingClientRect();
     const isMobile = window.innerWidth < 768;
-    if (isMobile) {
-      canvas.width = rect.width * window.devicePixelRatio;
-      canvas.height = (window.innerHeight - 250) * window.devicePixelRatio;
-      canvas.style.height = (window.innerHeight - 250) + 'px';
-    } else {
-      canvas.width = rect.width * window.devicePixelRatio;
-      canvas.height = 700 * window.devicePixelRatio;
-      canvas.style.height = '700px';
-    }
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    canvas.width = rect.width;
+    canvas.height = isMobile ? window.innerHeight - 250 : 700;
+    canvas.style.width = `${rect.width}px`;
+    canvas.style.height = isMobile ? `${window.innerHeight - 250}px` : '700px';
 
+    const ctx = canvas.getContext('2d');
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = currentColor;
@@ -103,23 +89,26 @@ export default function Whiteboard() {
     const handleResize = () => {
       const newRect = canvas.getBoundingClientRect();
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      if (window.innerWidth < 768) {
-        canvas.width = newRect.width * window.devicePixelRatio;
-        canvas.height = (window.innerHeight - 250) * window.devicePixelRatio;
-        canvas.style.height = (window.innerHeight - 250) + 'px';
-      } else {
-        canvas.width = newRect.width * window.devicePixelRatio;
-        canvas.height = 700 * window.devicePixelRatio;
-        canvas.style.height = '700px';
-      }
-      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      canvas.width = newRect.width;
+      canvas.height = isMobile ? window.innerHeight - 250 : 700;
+      canvas.style.width = `${newRect.width}px`;
+      canvas.style.height = isMobile ? `${window.innerHeight - 250}px` : '700px';
       ctx.putImageData(imageData, 0, 0);
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Draw functions
+  useEffect(() => {
+    // Color or size update
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.strokeStyle = currentColor;
+    ctx.lineWidth = currentSize;
+  }, [currentColor, currentSize]);
+
+  // Drawing
   function drawOnCanvas(ctx, drawData) {
     ctx.save();
     ctx.beginPath();
@@ -136,15 +125,10 @@ export default function Whiteboard() {
       ctx.setLineDash(drawData.pencilType === 'dashed' ? [10, 10] : []);
       switch (drawData.shape) {
         case 'rectangle':
-          ctx.strokeRect(
-            drawData.fromX,
-            drawData.fromY,
-            drawData.toX - drawData.fromX,
-            drawData.toY - drawData.fromY
-          );
+          ctx.strokeRect(drawData.fromX, drawData.fromY, drawData.toX-drawData.fromX, drawData.toY-drawData.fromY);
           break;
         case 'circle': {
-          const radius = Math.hypot(drawData.toX - drawData.fromX, drawData.toY - drawData.fromY);
+          const radius = Math.hypot(drawData.toX-drawData.fromX, drawData.toY-drawData.fromY);
           ctx.arc(drawData.fromX, drawData.fromY, radius, 0, 2 * Math.PI);
           ctx.stroke();
           break;
@@ -154,7 +138,7 @@ export default function Whiteboard() {
           ctx.lineTo(drawData.toX, drawData.toY);
           ctx.stroke();
           break;
-        default: // free
+        default:
           ctx.moveTo(drawData.fromX, drawData.fromY);
           ctx.lineTo(drawData.toX, drawData.toY);
           ctx.stroke();
@@ -164,13 +148,12 @@ export default function Whiteboard() {
     ctx.restore();
   }
 
-  // Mouse/Touch Helpers
   const getMousePos = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     return {
-      x: (e.clientX - rect.left) * (canvas.width / rect.width) / window.devicePixelRatio,
-      y: (e.clientY - rect.top) * (canvas.height / rect.height) / window.devicePixelRatio
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
     };
   };
 
@@ -179,12 +162,11 @@ export default function Whiteboard() {
     const rect = canvas.getBoundingClientRect();
     const touch = e.touches[0];
     return {
-      x: (touch.clientX - rect.left) * (canvas.width / rect.width) / window.devicePixelRatio,
-      y: (touch.clientY - rect.top) * (canvas.height / rect.height) / window.devicePixelRatio
+      x: touch.clientX - rect.left,
+      y: touch.clientY - rect.top
     };
   };
 
-  // Drawing Handlers
   const startDrawing = (e) => {
     if (!isJoined) return;
     e.preventDefault();
@@ -194,11 +176,9 @@ export default function Whiteboard() {
 
     if (drawingShape !== 'free') {
       setStartShapePos(pos);
-      const canvas = canvasRef.current;
-      setTempCanvasImage(canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height));
+      setTempCanvasImage(canvasRef.current.getContext('2d').getImageData(0, 0, canvasRef.current.width, canvasRef.current.height));
     } else {
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvasRef.current.getContext('2d');
       if (currentTool === 'eraser') {
         ctx.globalCompositeOperation = 'destination-out';
         ctx.lineWidth = eraserSize;
@@ -250,7 +230,7 @@ export default function Whiteboard() {
           size: currentSize,
           shape: drawingShape,
           pencilType,
-          eraserSize: eraserSize
+          eraserSize
         });
       }
       setLastPos(pos);
@@ -263,7 +243,6 @@ export default function Whiteboard() {
     setIsDrawing(false);
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
-
     if (drawingShape !== 'free' && startShapePos && tempCanvasImage) {
       const pos = e.type && e.type.includes('touch') ? getTouchPos(e) : getMousePos(e);
       ctx.putImageData(tempCanvasImage, 0, 0);
@@ -277,7 +256,7 @@ export default function Whiteboard() {
         size: currentSize,
         shape: drawingShape,
         pencilType,
-        eraserSize: eraserSize
+        eraserSize
       };
       drawOnCanvas(ctx, drawData);
       if (socket && socket.connected) {
@@ -290,7 +269,6 @@ export default function Whiteboard() {
     ctx.beginPath();
   };
 
-  // Clear Board
   const clearBoard = () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -300,37 +278,54 @@ export default function Whiteboard() {
     }
   };
 
+  // Passkey generator
+  const handleGenerateKey = () => {
+    const gen = Math.random().toString(36).substr(2, 8).toUpperCase();
+    setPassKey(gen);
+    setGeneratedKey(gen);
+  };
+
   // UI
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-teal-50">
       {/* Room Selection */}
       {!isJoined && (
-        <div className="bg-white shadow p-4 rounded max-w-md mx-auto my-8">
-          <h2 className="text-lg mb-4 font-bold">Join a Whiteboard Room</h2>
-          <div className="mb-2">
-            <label className="mr-2">Room Type:</label>
+        <div className="bg-white/90 shadow-lg p-8 rounded-xl max-w-md mx-auto my-24 border border-blue-200">
+          <h2 className="text-2xl mb-6 font-bold text-center text-blue-700">Join a Whiteboard Room</h2>
+          <div className="flex justify-center mb-4 gap-4">
             <button
-              className={`mr-2 px-3 py-1 rounded ${roomType === 'public' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}
+              className={`px-5 py-2 rounded text-lg font-semibold ${roomType==='public'?'bg-blue-500 text-white':'bg-gray-100 text-blue-700 hover:bg-blue-200'}`}
               onClick={() => setRoomType('public')}
             >Public</button>
             <button
-              className={`px-3 py-1 rounded ${roomType === 'private' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}
+              className={`px-5 py-2 rounded text-lg font-semibold ${roomType==='private'?'bg-blue-500 text-white':'bg-gray-100 text-blue-700 hover:bg-blue-200'}`}
               onClick={() => setRoomType('private')}
             >Private</button>
           </div>
           {roomType === 'private' && (
-            <div className="mb-2">
-              <input
-                type="text"
-                placeholder="Enter Passkey"
-                value={passKey}
-                onChange={e => setPassKey(e.target.value)}
-                className="border rounded px-2 py-1 w-full"
-              />
-            </div>
+            <>
+              <div className="mb-3 flex items-center gap-2">
+                <button
+                  className="bg-green-500 hover:bg-green-600 text-white font-semibold px-3 py-1 rounded"
+                  onClick={handleGenerateKey}
+                >Generate Passkey</button>
+                {generatedKey && <span className="font-mono bg-gray-100 text-blue-700 px-2 py-1 rounded select-all">{generatedKey}</span>}
+              </div>
+              <div className="mb-4">
+                <input
+                  type="text"
+                  placeholder="Paste or generate passkey"
+                  value={passKey}
+                  onChange={e => setPassKey(e.target.value)}
+                  className="border rounded px-2 py-2 w-full font-mono text-lg shadow focus:border-blue-500"
+                />
+                <small className="text-gray-500">Share this passkey for others to join your room.</small>
+              </div>
+            </>
           )}
           <button
-            className="bg-green-500 text-white px-4 py-2 rounded"
+            className={`bg-blue-600 text-white text-lg font-bold px-6 py-2 rounded w-full mt-3 hover:bg-blue-700 transition ${roomType === 'private' && !passKey ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={roomType === 'private' && !passKey}
             onClick={() => setIsJoined(true)}
           >
             Join Room
@@ -342,80 +337,63 @@ export default function Whiteboard() {
       {isJoined && (
         <>
           {/* Header */}
-          <div className="bg-white shadow-sm border-b border-gray-200 p-3 md:p-4">
+          <div className="bg-white shadow-sm border-b border-blue-200 p-4">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
-              <h1 className="text-lg md:text-2xl font-bold text-gray-900">Real-Time Collaborative Whiteboard</h1>
-              <div className="flex items-center space-x-2 md:space-x-4">
-                <div className="flex items-center space-x-1 md:space-x-2">
-                  <span className={`w-2 h-2 md:w-3 md:h-3 rounded-full ${
-                    isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
-                  }`}></span>
-                  <span className="text-xs md:text-sm text-gray-600">
+              <h1 className="text-2xl font-bold text-blue-900">Real-Time Collaborative Whiteboard</h1>
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2">
+                  <span className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
+                  <span className="text-sm text-gray-600">
                     {userCount} user{userCount !== 1 ? 's' : ''} online
                   </span>
                 </div>
                 <button
                   onClick={clearBoard}
-                  className="px-2 py-1 md:px-4 md:py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-xs md:text-sm"
+                  className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition font-semibold"
                 >
-                  Clear
+                  Clear Board
                 </button>
               </div>
             </div>
           </div>
-
-          {/* Desktop Toolbar */}
-          <div className="hidden md:block bg-white shadow-sm border-b border-gray-200 p-4">
+          {/* Toolbar */}
+          <div className="bg-white shadow-sm border-b border-blue-200 p-4">
             <div className="max-w-7xl mx-auto flex items-center justify-between flex-wrap gap-4">
               {/* Tools */}
-              <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-2">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-gray-700">Tool:</span>
                   <button
                     onClick={() => setCurrentTool('pen')}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      currentTool === 'pen'
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                    }`}
+                    className={`px-3 py-2 rounded-lg text-sm font-semibold transition scale-105 ${currentTool === 'pen' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-blue-200'}`}
                   >✏️ Pen</button>
                   <button
                     onClick={() => setCurrentTool('eraser')}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      currentTool === 'eraser'
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                    }`}
+                    className={`px-3 py-2 rounded-lg text-sm font-semibold transition scale-105 ${currentTool === 'eraser' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-blue-200'}`}
                   >🧽 Eraser</button>
                 </div>
                 {/* Shapes */}
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-gray-700">Shape:</span>
                   {['free', 'rectangle', 'circle', 'line'].map(shape => (
                     <button
                       key={shape}
                       onClick={() => setDrawingShape(shape)}
-                      className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        drawingShape === shape
-                          ? 'bg-blue-500 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                      }`}
+                      className={`px-3 py-2 rounded-lg text-sm font-semibold transition scale-105 ${drawingShape === shape ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-blue-200'}`}
                     >
                       {shape.charAt(0).toUpperCase() + shape.slice(1)}
                     </button>
                   ))}
                 </div>
                 {/* Colors */}
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-gray-700">Color:</span>
-                  <div className="flex space-x-2">
+                  <div className="flex gap-2">
                     {colors.map(color => (
                       <button
                         key={color}
                         onClick={() => setCurrentColor(color)}
-                        className={`w-10 h-10 rounded-full border-3 transition-all ${
-                          currentColor === color ? 'border-gray-800 scale-110' : 'border-transparent'
-                        }`}
+                        className={`w-10 h-10 rounded-full border-3 transition scale-110 ${currentColor === color ? 'border-blue-800 ring-4' : 'border-transparent'}`}
                         style={{ backgroundColor: color }}
                       />
                     ))}
@@ -423,7 +401,7 @@ export default function Whiteboard() {
                 </div>
                 {/* Pencil Type */}
                 {currentTool === 'pen' && (
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-gray-700">Pencil:</span>
                     <select
                       value={pencilType}
@@ -437,7 +415,7 @@ export default function Whiteboard() {
                 )}
               </div>
               {/* Size */}
-              <div className="flex items-center space-x-3">
+              <div className="flex items-center gap-3">
                 <span className="text-sm font-medium text-gray-700">
                   {currentTool === 'eraser' ? 'Eraser Size:' : 'Size:'}
                 </span>
@@ -458,14 +436,10 @@ export default function Whiteboard() {
               </div>
             </div>
           </div>
-
-          {/* Mobile Toolbars & CANVAS below */}
-          {/* ... (You can re-use the mobile toolbar logic from your original code, add shapes, etc.) */}
-
-          {/* Canvas Section */}
-          <div className="flex-1 p-2 md:p-4 pb-32 md:pb-4">
+          {/* Canvas */}
+          <div className="flex-1 p-4">
             <div className="max-w-7xl mx-auto">
-              <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+              <div className="bg-white rounded-xl shadow-xl overflow-hidden">
                 <canvas
                   ref={canvasRef}
                   className="block w-full cursor-crosshair"
@@ -483,17 +457,16 @@ export default function Whiteboard() {
               </div>
             </div>
           </div>
-          <div className="text-color py-4 text-gray-500 text-sm">
+          <div className='text-color pt-4 text-blue-500 text-sm text-center'>
             created by Ranjeet Kumar
           </div>
         </>
       )}
 
-
       {/* Connection Status */}
       {isJoined && !isConnected && (
         <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg z-50">
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-2">
             <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
             <span className="text-sm">Reconnecting to server...</span>
           </div>
