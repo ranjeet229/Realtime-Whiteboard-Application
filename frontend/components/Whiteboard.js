@@ -9,6 +9,7 @@ export default function Whiteboard() {
   const [currentTool, setCurrentTool] = useState('pen');
   const [currentColor, setCurrentColor] = useState('#000000');
   const [currentSize, setCurrentSize] = useState(3);
+  const [eraserSize, setEraserSize] = useState(10);
   const [userCount, setUserCount] = useState(1);
   const [isConnected, setIsConnected] = useState(false);
   const [lastPos, setLastPos] = useState({ x: 0, y: 0 });
