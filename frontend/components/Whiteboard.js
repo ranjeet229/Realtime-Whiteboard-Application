@@ -431,7 +431,7 @@ export default function Whiteboard() {
         <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-full shadow-2xl z-50 animate-pulse">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 bg-white rounded-full"></span>
-            <span className="text-sm font-medium">Reconnecting...</span>
+            <span className="text-sm font-medium">Reconnecting to server...</span>
           </div>
         </div>
       )}
