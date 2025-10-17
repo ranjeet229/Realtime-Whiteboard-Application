@@ -483,19 +483,12 @@ export default function Whiteboard() {
               </div>
             </div>
           </div>
-<<<<<<< HEAD
           <div className="text-color py-4 text-gray-500 text-sm">
             created by Ranjeet Kumar
           </div>
         </>
       )}
-=======
-        </div>
-      </div>
-      <div className='text-color pl-8 py-4 text-gray-500 text-sm'>
-          created by Ranjeet Kumar
-      </div>
->>>>>>> 9108defbc8351ddaf3763bce2db746aa90f6ecfb
+
 
       {/* Connection Status */}
       {isJoined && !isConnected && (
