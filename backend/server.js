@@ -6,10 +6,10 @@ require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
-// Configure CORS for Socket.io
+
 const io = socketIo(server, {
   cors: {
-    origin: "http://localhost:3000", // Update as required
+    origin: "*", // For full accessibility; restrict in real deployments!
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -18,12 +18,10 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.json());
 
-// Store active users and drawing data per room
-let activeUsers = new Map();
-// drawingHistory is now an object: { [roomId]: [events] }
-let drawingHistory = {};
+let activeUsers = new Map(); // socketId -> userData
+let drawingHistory = {};     // roomId -> [events]
 
-function roomIdFromData(userData = {}) {
+function getRoomId(userData = {}) {
   return userData.roomType === 'private' && userData.passKey
     ? userData.passKey.trim()
     : 'public';
@@ -32,11 +30,10 @@ function roomIdFromData(userData = {}) {
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
-  // Handle user joining a room
+  // User joins a room
   socket.on('user_join', (userData) => {
-    const roomId = roomIdFromData(userData);
+    const roomId = getRoomId(userData);
     socket.join(roomId);
-
     activeUsers.set(socket.id, {
       id: socket.id,
       ...userData,
@@ -44,22 +41,21 @@ io.on('connection', (socket) => {
       joinedAt: new Date()
     });
 
-    // Init room's drawing event log if needed
     if (!drawingHistory[roomId]) drawingHistory[roomId] = [];
 
-    // Send room-limited drawing history
+    // Send only this room's history
     socket.emit('drawing_history', drawingHistory[roomId]);
 
-    // Broadcast user count to room
+    // Only users in this room
     const userCount = Array.from(activeUsers.values()).filter(u => u.roomId === roomId).length;
     io.to(roomId).emit('user_count_update', userCount);
 
     console.log(
-      `User ${userData.username || socket.id} joined [room: ${roomId}]. Users in this room: ${userCount}`
+      `User ${userData.username || socket.id} joined [room: ${roomId}]. Users: ${userCount}`
     );
   });
 
-  // Drawing events
+  // Draw
   socket.on('draw', (drawData) => {
     const user = activeUsers.get(socket.id);
     if (!user) return;
@@ -68,23 +64,18 @@ io.on('connection', (socket) => {
       ...drawData,
       socketId: socket.id,
       timestamp: new Date(),
-      // Capture drawing meta
-      shape: drawData.shape || 'free',
-      pencilType: drawData.pencilType || 'solid',
-      eraserSize: drawData.eraserSize || null,
     };
     drawingHistory[roomId] = drawingHistory[roomId] || [];
     drawingHistory[roomId].push(drawingEvent);
 
-    // Limit history for memory protection
+    // History limit
     if (drawingHistory[roomId].length > 1000)
       drawingHistory[roomId] = drawingHistory[roomId].slice(-1000);
 
-    // Broadcast to peers in same room
     socket.to(roomId).emit('remote_draw', drawingEvent);
   });
 
-  // Erase events (use same meta if needed)
+  // Erase
   socket.on('erase', (eraseData) => {
     const user = activeUsers.get(socket.id);
     if (!user) return;
@@ -93,8 +84,6 @@ io.on('connection', (socket) => {
       ...eraseData,
       socketId: socket.id,
       timestamp: new Date(),
-      shape: eraseData.shape || 'free',
-      eraserSize: eraseData.eraserSize || 20,
     };
     drawingHistory[roomId] = drawingHistory[roomId] || [];
     drawingHistory[roomId].push(eraseEvent);
@@ -105,7 +94,7 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('remote_erase', eraseEvent);
   });
 
-  // Clear events
+  // Clear
   socket.on('clear_board', () => {
     const user = activeUsers.get(socket.id);
     if (!user) return;
@@ -114,7 +103,7 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('board_cleared', { clearedBy: socket.id });
   });
 
-  // Cursor movement (if using)
+  // Cursor movement
   socket.on('cursor_move', (cursorData) => {
     const user = activeUsers.get(socket.id);
     if (!user) return;
@@ -125,27 +114,23 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Disconnection
+  // Disconnect
   socket.on('disconnect', () => {
     const user = activeUsers.get(socket.id);
     if (user) {
       const { roomId } = user;
       activeUsers.delete(socket.id);
-
-      // Broadcast updated user count to room
       const userCount = Array.from(activeUsers.values()).filter(u => u.roomId === roomId).length;
       io.to(roomId).emit('user_count_update', userCount);
-
-      // Remove user cursor
       socket.to(roomId).emit('user_disconnected', socket.id);
       console.log(`User disconnected: ${socket.id} (room: ${roomId})`);
     } else {
-      activeUsers.delete(socket.id); // Fallback
+      activeUsers.delete(socket.id);
     }
   });
 });
 
-// Health check endpoint
+// Health check
 app.get('/health', (req, res) => {
   res.json({
     status: 'OK',
@@ -158,5 +143,5 @@ app.get('/health', (req, res) => {
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`check: http://localhost:${PORT}/health`);
+  console.log(`Health: http://localhost:${PORT}/health`);
 });
