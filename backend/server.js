@@ -1,8 +1,8 @@
-const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
-const cors = require('cors');
-require('dotenv').config();
+const express = require("express");
+const http = require("http");
+const socketIo = require("socket.io");
+const cors = require("cors");
+require("dotenv").config();
 
 const app = express();
 const server = http.createServer(app);
@@ -12,8 +12,8 @@ const io = socketIo(server, {
   cors: {
     origin: "http://localhost:3000",
     methods: ["GET", "POST"],
-    credentials: true
-  }
+    credentials: true,
+  },
 });
 
 app.use(cors());
@@ -23,96 +23,77 @@ app.use(express.json());
 let activeUsers = new Map();
 let drawingHistory = [];
 
-io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
+io.on("connection", (socket) => {
+  console.log("User connected:", socket.id); // Handle user joining
 
-  // Handle user joining
-  socket.on('user_join', (userData) => {
+  socket.on("user_join", (userData) => {
     activeUsers.set(socket.id, {
       id: socket.id,
       ...userData,
-      joinedAt: new Date()
-    });
-    
-    // Send current drawing history to new user
-    socket.emit('drawing_history', drawingHistory);
-    
-    // Broadcast updated user count
-    io.emit('user_count_update', activeUsers.size);
-    
-    console.log(`User ${userData.username || socket.id} joined. Total users: ${activeUsers.size}`);
-  });
+      joinedAt: new Date(),
+    }); // Send current drawing history to new user
+    socket.emit("drawing_history", drawingHistory); // Broadcast updated user count
+    io.emit("user_count_update", activeUsers.size);
+    console.log(
+      `User ${userData.username || socket.id} joined. Total users: ${
+        activeUsers.size
+      }`
+    );
+  }); // Handle drawing events
 
-  // Handle drawing events
-  socket.on('draw', (drawData) => {
+  socket.on("draw", (drawData) => {
     // Store drawing data
     const drawingEvent = {
       ...drawData,
       socketId: socket.id,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
-    
-    drawingHistory.push(drawingEvent);
-    
-    // Limit history to prevent memory issues (keep last 1000 events)
+    drawingHistory.push(drawingEvent); // Limit history to prevent memory issues (keep last 1000 events)
     if (drawingHistory.length > 1000) {
       drawingHistory = drawingHistory.slice(-1000);
-    }
-    
-    // Broadcast to all other users
-    socket.broadcast.emit('remote_draw', drawingEvent);
-  });
+    } // Broadcast to all other users
+    socket.broadcast.emit("remote_draw", drawingEvent);
+  }); // Handle erase events
 
-  // Handle erase events
-  socket.on('erase', (eraseData) => {
+  socket.on("erase", (eraseData) => {
     const eraseEvent = {
       ...eraseData,
       socketId: socket.id,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
-    
     drawingHistory.push(eraseEvent);
-    
     if (drawingHistory.length > 1000) {
       drawingHistory = drawingHistory.slice(-1000);
     }
-    
-    socket.broadcast.emit('remote_erase', eraseEvent);
-  });
+    socket.broadcast.emit("remote_erase", eraseEvent);
+  }); // Handle clear board
 
-  // Handle clear board
-  socket.on('clear_board', () => {
+  socket.on("clear_board", () => {
     drawingHistory = [];
-    io.emit('board_cleared', { clearedBy: socket.id });
-  });
+    io.emit("board_cleared", { clearedBy: socket.id });
+  }); // Handle cursor movement
 
-  // Handle cursor movement
-  socket.on('cursor_move', (cursorData) => {
-    socket.broadcast.emit('remote_cursor', {
+  socket.on("cursor_move", (cursorData) => {
+    socket.broadcast.emit("remote_cursor", {
       ...cursorData,
-      socketId: socket.id
+      socketId: socket.id,
     });
-  });
+  }); // Handle disconnection
 
-  // Handle disconnection
-  socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
-    activeUsers.delete(socket.id);
-    
-    // Broadcast updated user count
-    io.emit('user_count_update', activeUsers.size);
-    
-    // Remove user cursor
-    socket.broadcast.emit('user_disconnected', socket.id);
+  socket.on("disconnect", () => {
+    console.log("User disconnected:", socket.id);
+    activeUsers.delete(socket.id); // Broadcast updated user count
+    io.emit("user_count_update", activeUsers.size); // Remove user cursor
+    socket.broadcast.emit("user_disconnected", socket.id);
   });
 });
 
 // Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+app.get("/health", (req, res) => {
+  res.json({
+    status: "OK",
     activeUsers: activeUsers.size,
-    drawingEvents: drawingHistory.length 
+    drawingEvents: drawingHistory.length,
   });
 });
 
