@@ -15,7 +15,7 @@ export default function Whiteboard() {
   const [lastPos, setLastPos] = useState({ x: 0, y: 0 });
   const [shapeStart, setShapeStart] = useState(null);
   const [previewShape, setPreviewShape] = useState(null);
-  const [history, setHistory] = useState([]); // ✅ local copy of all drawn shapes
+  const [history, setHistory] = useState([]); 
 
   const palette = [
     "#000000",
@@ -42,7 +42,7 @@ export default function Whiteboard() {
 
   // --- SOCKET CONNECTION ---
   useEffect(() => {
-    const newSocket = io("http://localhost:5000", {
+    const newSocket = io("https://rtwhiteboardrk.onrender.com", {
       transports: ["websocket", "polling"],
     });
     setSocket(newSocket);
@@ -184,7 +184,7 @@ export default function Whiteboard() {
     if (
       ["line", "rectangle", "circle", "ellipse", "arrow"].includes(currentTool)
     ) {
-      // ✅ draw preview shape on top of existing drawings (without clearing)
+
       redrawCanvas(history);
       setPreviewShape({
         type: currentTool,
