@@ -13,40 +13,53 @@ export default function Whiteboard() {
   const [userCount, setUserCount] = useState(1);
   const [isConnected, setIsConnected] = useState(false);
   const [lastPos, setLastPos] = useState({ x: 0, y: 0 });
+  const [shapeStart, setShapeStart] = useState(null);
+  const [previewShape, setPreviewShape] = useState(null);
+  const [history, setHistory] = useState([]); // ✅ local copy of all drawn shapes
 
-  const colors = ['#000000', '#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'];
-  const [cursorPos, setCursorPos] = useState({ x: null, y: null });
+  const palette = [
+    "#000000",
+    "#ef4444",
+    "#3b82f6",
+    "#10b981",
+    "#f59e0b",
+    "#8b5cf6",
+    "#f472b6",
+    "#facc15",
+    "#22d3ee",
+    "#94a3b8",
+  ];
 
+  const shapeOptions = [
+    { label: "Pen", value: "pen" },
+    { label: "Eraser", value: "eraser" },
+    { label: "Line", value: "line" },
+    { label: "Rectangle", value: "rectangle" },
+    { label: "Circle", value: "circle" },
+    { label: "Ellipse", value: "ellipse" },
+    { label: "Arrow", value: "arrow" },
+  ];
+
+  // --- SOCKET CONNECTION ---
   useEffect(() => {
-    // Initialize karo socket connection ko
-    const newSocket = io('https://rtwhiteboardrk.onrender.com', {
-      transports: ['websocket', 'polling']
+    const newSocket = io("http://localhost:5000", {
+      transports: ["websocket", "polling"],
     });
     setSocket(newSocket);
 
     newSocket.on("connect", () => {
       setIsConnected(true);
-      
-      // Join as user
-      newSocket.emit('user_join', {
-        username: `User_${Math.random().toString(36).substr(2, 5)}`
+      newSocket.emit("user_join", {
+        username: `User_${Math.random().toString(36).substr(2, 5)}`,
       });
     });
     newSocket.on("disconnect", () => setIsConnected(false));
     newSocket.on("connect_error", () => setIsConnected(false));
     newSocket.on("user_count_update", setUserCount);
 
-    newSocket.on('drawing_history', (history) => {
-      // Redraw all previous drawing events
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
-      history.forEach(event => {
-        drawOnCanvas(ctx, event);
-      });
+    newSocket.on("drawing_history", (history) => {
+      setHistory(history);
+      redrawCanvas(history);
     });
 
     newSocket.on("remote_draw", (data) => {
@@ -75,61 +88,29 @@ export default function Whiteboard() {
     return () => newSocket.close();
   }, []);
 
-  // Update karo  brush color ko and size without resizing or clearing the canvas
-useEffect(() => {
-  const canvas = canvasRef.current;
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  ctx.strokeStyle = currentColor;
-  ctx.lineWidth = currentSize;
-}, [currentColor, currentSize]);
+  // --- CANVAS INITIALIZATION ---
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    ctx.strokeStyle = currentColor;
+    ctx.lineWidth = currentSize;
+  }, [currentColor, currentSize]);
 
   // --- RESPONSIVE RESIZE ---
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const ctx = canvas.getContext("2d");
 
-    const ctx = canvas.getContext('2d');
-    
-    // Set canvas background size to match display size
-    const rect = canvas.getBoundingClientRect();
-    const isMobile = window.innerWidth < 768;
-    
-
-    //mobile device ke liye 
-    if (isMobile) {
+    function resize() {
+      const rect = canvas.getBoundingClientRect();
+      const temp = ctx.getImageData(0, 0, canvas.width, canvas.height);
       canvas.width = rect.width * window.devicePixelRatio;
-      canvas.height = (window.innerHeight - 250) * window.devicePixelRatio;
-      canvas.style.height = (window.innerHeight - 250) + 'px';
-    } else {
-      canvas.width = rect.width * window.devicePixelRatio;
-      canvas.height = 700 * window.devicePixelRatio;
-      canvas.style.height = '700px';
-    }
-    
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-    
-    // Set drawing properties
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = currentColor;
-    ctx.lineWidth = currentSize;
-
-    // Handle resize
-    const handleResize = () => {
-      const newRect = canvas.getBoundingClientRect();
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      
-      if (window.innerWidth < 768) {
-        canvas.width = newRect.width * window.devicePixelRatio;
-        canvas.height = (window.innerHeight - 250) * window.devicePixelRatio;
-        canvas.style.height = (window.innerHeight - 250) + 'px';
-      } else {
-        canvas.width = newRect.width * window.devicePixelRatio;
-        canvas.height = 700 * window.devicePixelRatio;
-        canvas.style.height = '700px';
-      }
-      
+      canvas.height =
+        (window.innerWidth < 768
+          ? window.innerHeight - 180
+          : 600) * window.devicePixelRatio;
       ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
       ctx.putImageData(temp, 0, 0);
     }
@@ -139,23 +120,7 @@ useEffect(() => {
     return () => window.removeEventListener("resize", resize);
   }, []);
 
-  const drawOnCanvas = (ctx, drawData) => {
-    ctx.beginPath();
-    ctx.moveTo(drawData.fromX, drawData.fromY);
-    
-    if (drawData.type === 'erase') {
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.lineWidth = drawData.size * 2;
-    } else {
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.strokeStyle = drawData.color;
-      ctx.lineWidth = drawData.size;
-    }
-    
-    ctx.lineTo(drawData.toX, drawData.toY);
-    ctx.stroke();
-  };
-
+  // --- COORDINATE HELPERS ---
   const getMousePos = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
@@ -189,16 +154,12 @@ useEffect(() => {
     const pos = e.type.includes("touch") ? getTouchPos(e) : getMousePos(e);
     setLastPos(pos);
     setIsDrawing(true);
-    
-    const pos = e.type.includes('touch') ? getTouchPos(e) : getMousePos(e);
-    setLastPos(pos);
-    
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    
-    if (currentTool === 'eraser') {
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.lineWidth = currentSize * 2;
+
+    if (
+      ["line", "rectangle", "circle", "ellipse", "arrow"].includes(currentTool)
+    ) {
+      setShapeStart(pos);
+      setPreviewShape(null);
     } else {
       const ctx = canvasRef.current.getContext("2d");
       if (currentTool === "eraser") {
@@ -251,21 +212,20 @@ useEffect(() => {
     // freehand drawing / erasing
     ctx.lineTo(pos.x, pos.y);
     ctx.stroke();
-    
-    // Send drawing data to server 
-    if (socket && socket.connected) {
-      const eventType = currentTool === 'eraser' ? 'erase' : 'draw';
-      socket.emit(eventType, {
-        type: eventType,
-        fromX: lastPos.x,
-        fromY: lastPos.y,
-        toX: pos.x,
-        toY: pos.y,
-        color: currentColor,
-        size: currentSize
-      });
-    }
-    
+
+    const eventType = currentTool === "eraser" ? "erase" : "draw";
+    const data = {
+      type: eventType,
+      fromX: lastPos.x,
+      fromY: lastPos.y,
+      toX: pos.x,
+      toY: pos.y,
+      color: currentColor,
+      size: currentSize,
+      eraserSize,
+    };
+    setHistory((prev) => [...prev, data]);
+    if (socket && socket.connected) socket.emit(eventType, data);
     setLastPos(pos);
   };
 
@@ -411,179 +371,149 @@ useEffect(() => {
 
   // --- UI ---
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b border-gray-200 p-3 md:p-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <h1 className="text-lg md:text-2xl font-bold text-gray-900">Real-Time Collaborative Whiteboard</h1>
-          <div className="flex items-center space-x-2 md:space-x-4">
-            <div className="flex items-center space-x-1 md:space-x-2">
-              <span className={`w-2 h-2 md:w-3 md:h-3 rounded-full ${
-                isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
-              }`}></span>
-              <span className="text-xs md:text-sm text-gray-600">
-                {userCount} user{userCount !== 1 ? 's' : ''} online
-              </span>
-            </div>
-            <button 
-              onClick={clearBoard}
-              className="px-2 py-1 md:px-4 md:py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors text-xs md:text-sm"
-            >
-              Clear
-            </button>
-          </div>
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-gray-50 to-gray-100">
+      {/* Toolbar */}
+      <div className="w-full bg-white border-b shadow-sm px-2 py-2 flex flex-col md:flex-row md:items-center gap-4">
+        <div className="flex items-center gap-2">
+          <label htmlFor="tool" className="font-medium text-gray-700 mr-2">
+            Tool:
+          </label>
+          <select
+            id="tool"
+            value={currentTool}
+            onChange={(e) => setCurrentTool(e.target.value)}
+            className="font-semibold px-2 py-1 border border-gray-200 rounded-lg text-gray-700 bg-gray-50 focus:ring-2 focus:ring-blue-400 appearance-none"
+          >
+            {shapeOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
-      </div>
 
-      {/* Desktop Toolbar */}
-      <div className="hidden md:block bg-white shadow-sm border-b border-gray-200 p-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between flex-wrap gap-4">
-          {/* Tools */}
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <span className="text-sm font-medium text-gray-700">Tool:</span>
+        <div className="flex items-center gap-4 flex-wrap">
+          {/* Colors */}
+          <div className="flex items-center gap-2 overflow-auto">
+            {palette.map((clr) => (
               <button
-                onClick={() => setCurrentTool('pen')}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  currentTool === 'pen' 
-                    ? 'bg-blue-500 text-white' 
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                key={clr}
+                className={`w-8 h-8 rounded-full border-2 cursor-pointer focus:ring-2 shadow-sm ${
+                  currentColor === clr
+                    ? "border-blue-600 ring-2 ring-blue-400"
+                    : "border-gray-200"
                 }`}
-              >
-                ✏️ Pen
-              </button>
-              <button
-                onClick={() => setCurrentTool('eraser')}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  currentTool === 'eraser' 
-                    ? 'bg-blue-500 text-white' 
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
-              >
-                🧽 Eraser
-              </button>
-            </div>
-            
-            {/* Colors */}
-            <div className="flex items-center space-x-2">
-              <span className="text-sm font-medium text-gray-700">Color:</span>
-              <div className="flex space-x-2">
-                {colors.map(color => (
-                  <button
-                    key={color}
-                    onClick={() => setCurrentColor(color)}
-                    className={`w-10 h-10 rounded-full border-3 transition-all ${
-                      currentColor === color ? 'border-gray-800 scale-110' : 'border-transparent'
-                    }`}
-                    style={{ backgroundColor: color }}
-                  />
-                ))}
-              </div>
-            </div>
+                style={{ backgroundColor: clr }}
+                onClick={() => setCurrentColor(clr)}
+              />
+            ))}
+            <input
+              type="color"
+              value={currentColor}
+              onChange={(e) => setCurrentColor(e.target.value)}
+              className="w-8 h-8 border-none rounded-full cursor-pointer"
+            />
           </div>
 
-          {/* Size */}
-          <div className="flex items-center space-x-3">
-            <span className="text-sm font-medium text-gray-700">Size:</span>
+          {/* Size slider */}
+          <div className="flex items-center gap-2">
+            <span className="hidden md:inline text-gray-700 font-medium">
+              {currentTool === "pen"
+                ? "Size:"
+                : currentTool === "eraser"
+                ? "Eraser:"
+                : "Shape:"}
+            </span>
             <input
               type="range"
               min="1"
-              max="50"
-              value={currentSize}
-              onChange={(e) => setCurrentSize(parseInt(e.target.value))}
-              className="w-32 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+              max="40"
+              value={
+                currentTool === "pen"
+                  ? currentSize
+                  : currentTool === "eraser"
+                  ? eraserSize
+                  : currentSize
+              }
+              onChange={(e) =>
+                currentTool === "pen"
+                  ? setCurrentSize(+e.target.value)
+                  : currentTool === "eraser"
+                  ? setEraserSize(+e.target.value)
+                  : setCurrentSize(+e.target.value)
+              }
+              className="w-24 accent-blue-500"
             />
-            <span className="text-sm text-gray-600 w-8">{currentSize}px</span>
+            <span className="text-sm font-semibold w-8 text-gray-700">
+              {currentTool === "pen"
+                ? currentSize
+                : currentTool === "eraser"
+                ? eraserSize
+                : currentSize}
+              px
+            </span>
           </div>
         </div>
-      </div>
 
-      {/* Mobile Toolbar */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-3 z-50 shadow-lg">
-        {/* Tool Selection Row */}
-        <div className="flex space-x-2 mb-3">
-          <button
-            onClick={() => setCurrentTool('pen')}
-            className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-              currentTool === 'pen' 
-                ? 'bg-blue-500 text-white' 
-                : 'bg-gray-200 text-gray-700'
-            }`}
-          >
-            ✏️ Pen
-          </button>
-          <button
-            onClick={() => setCurrentTool('eraser')}
-            className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-              currentTool === 'eraser' 
-                ? 'bg-blue-500 text-white' 
-                : 'bg-gray-200 text-gray-700'
-            }`}
-          >
-            🧽 Eraser
-          </button>
-        </div>
-        
-        {/* Color Palette Row */}
-        <div className="flex justify-center space-x-3 mb-3">
-          {colors.map(color => (
-            <button
-              key={color}
-              onClick={() => setCurrentColor(color)}
-              className={`w-8 h-8 rounded-full border-2 transition-all ${
-                currentColor === color ? 'border-gray-800 scale-110' : 'border-transparent'
+        <div className="flex-grow" />
+
+        <div className="flex items-center gap-4">
+          <div className="flex items-center px-3 py-1.5 bg-gray-50 rounded-full">
+            <span
+              className={`w-2 h-2 rounded-full mr-2 ${
+                isConnected ? "bg-green-500 animate-pulse" : "bg-red-500"
               }`}
-              style={{ backgroundColor: color }}
-            />
-          ))}
-        </div>
-        
-        {/* Size Control Row */}
-        <div className="flex items-center space-x-3">
-          <span className="text-sm font-medium text-gray-700 whitespace-nowrap">Size:</span>
-          <input
-            type="range"
-            min="1"
-            max="50"
-            value={currentSize}
-            onChange={(e) => setCurrentSize(parseInt(e.target.value))}
-            className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-          />
-          <span className="text-sm text-gray-600 w-8">{currentSize}px</span>
+            ></span>
+            <span className="text-sm font-semibold text-gray-600">
+              {userCount} online
+            </span>
+          </div>
+          <button
+            onClick={clearBoard}
+            className="px-4 py-1.5 bg-red-500 text-white rounded-full hover:bg-red-600 font-medium shadow transition"
+          >
+            Clear
+          </button>
         </div>
       </div>
 
       {/* Canvas */}
-      <div className="flex-1 p-2 md:p-4 pb-32 md:pb-4">
-        <div className="max-w-7xl mx-auto">
-          <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-            <canvas
-              ref={canvasRef}
-              className="block w-full cursor-crosshair"
-              width={1200}
-              height={700}
-              onMouseDown={startDrawing}
-              onMouseMove={draw}
-              onMouseUp={stopDrawing}
-              onMouseOut={stopDrawing}
-              onTouchStart={startDrawing}
-              onTouchMove={draw}
-              onTouchEnd={stopDrawing}
-              style={{ touchAction: 'none' }}
-            />
-          </div>
+      <div className="flex-1 p-3 flex justify-center items-center">
+        <div className="bg-white rounded-xl shadow-xl max-w-7xl w-full h-full relative border overflow-hidden">
+          <canvas
+            ref={canvasRef}
+            className="block w-full h-full cursor-crosshair"
+            width={1200}
+            height={600}
+            onMouseDown={startDrawing}
+            onMouseMove={draw}
+            onMouseUp={stopDrawing}
+            onMouseOut={stopDrawing}
+            onTouchStart={startDrawing}
+            onTouchMove={draw}
+            onTouchEnd={stopDrawing}
+            style={{
+              touchAction: "none",
+              background: "transparent",
+              width: "100%",
+              height: "100%",
+            }}
+          />
         </div>
       </div>
-      <div className='text-color py-4 text-gray-500 text-sm'>
-          created by Ranjeet Kumar
+
+      {/* Footer */}
+      <div className="py-3 text-center bg-white border-t border-gray-200 mt-auto">
+        <span className="text-xs text-gray-400">Created by Ranjeet Kumar</span>
       </div>
 
-      {/* Connection Status */}
       {!isConnected && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg z-50">
-          <div className="flex items-center space-x-2">
-            <span className="w-2 h-2 bg-white rounded-full animate-pulse"></span>
-            <span className="text-sm">Reconnecting to server...</span>
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-red-500 text-white px-6 py-3 rounded-full shadow-2xl z-50 animate-pulse">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 bg-white rounded-full"></span>
+            <span className="text-sm font-medium">
+              Reconnecting to server...
+            </span>
           </div>
         </div>
       )}
