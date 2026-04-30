@@ -2,103 +2,70 @@ const express = require("express");
 const http = require("http");
 const socketIo = require("socket.io");
 const cors = require("cors");
+const mongoose = require("mongoose");
 require("dotenv").config();
+
+if (!process.env.JWT_SECRET) {
+  console.warn(
+    "[config] JWT_SECRET is not set — authentication and Socket.IO room tokens will fail."
+  );
+}
+
+const { connectDb } = require("./config/db");
+const roomRoutes = require("./routes/roomRoutes");
+const { setupWhiteboardSocket } = require("./socket/whiteboardSocket");
 
 const app = express();
 const server = http.createServer(app);
 
-// Configure CORS for Socket.io
+const allowedOrigins = (process.env.CORS_ORIGINS || process.env.FRONTEND_URL || "http://localhost:3000")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  })
+);
+app.use(express.json());
+
+app.use("/api/rooms", roomRoutes);
+
+app.get("/health", (req, res) => {
+  const state = mongoose.connection.readyState;
+  const mongo =
+    state === 1 ? "connected" : state === 2 ? "connecting" : "disconnected";
+  res.json({
+    status: "OK",
+    service: "whiteboard-api",
+    mongo,
+    database: mongoose.connection.name || null,
+  });
+});
+
 const io = socketIo(server, {
   cors: {
-    origin: "http://localhost:3000",
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
     credentials: true,
   },
 });
 
-app.use(cors());
-app.use(express.json());
-
-// Store active users and drawing data
-let activeUsers = new Map();
-let drawingHistory = [];
-
-io.on("connection", (socket) => {
-  console.log("User connected:", socket.id); // Handle user joining
-
-  socket.on("user_join", (userData) => {
-    activeUsers.set(socket.id, {
-      id: socket.id,
-      ...userData,
-      joinedAt: new Date(),
-    }); // Send current drawing history to new user
-    socket.emit("drawing_history", drawingHistory); // Broadcast updated user count
-    io.emit("user_count_update", activeUsers.size);
-    console.log(
-      `User ${userData.username || socket.id} joined. Total users: ${
-        activeUsers.size
-      }`
-    );
-  }); // Handle drawing events
-
-  socket.on("draw", (drawData) => {
-    // Store drawing data
-    const drawingEvent = {
-      ...drawData,
-      socketId: socket.id,
-      timestamp: new Date(),
-    };
-    drawingHistory.push(drawingEvent); // Limit history to prevent memory issues (keep last 1000 events)
-    if (drawingHistory.length > 1000) {
-      drawingHistory = drawingHistory.slice(-1000);
-    } // Broadcast to all other users
-    socket.broadcast.emit("remote_draw", drawingEvent);
-  }); // Handle erase events
-
-  socket.on("erase", (eraseData) => {
-    const eraseEvent = {
-      ...eraseData,
-      socketId: socket.id,
-      timestamp: new Date(),
-    };
-    drawingHistory.push(eraseEvent);
-    if (drawingHistory.length > 1000) {
-      drawingHistory = drawingHistory.slice(-1000);
-    }
-    socket.broadcast.emit("remote_erase", eraseEvent);
-  }); // Handle clear board
-
-  socket.on("clear_board", () => {
-    drawingHistory = [];
-    io.emit("board_cleared", { clearedBy: socket.id });
-  }); // Handle cursor movement
-
-  socket.on("cursor_move", (cursorData) => {
-    socket.broadcast.emit("remote_cursor", {
-      ...cursorData,
-      socketId: socket.id,
-    });
-  }); // Handle disconnection
-
-  socket.on("disconnect", () => {
-    console.log("User disconnected:", socket.id);
-    activeUsers.delete(socket.id); // Broadcast updated user count
-    io.emit("user_count_update", activeUsers.size); // Remove user cursor
-    socket.broadcast.emit("user_disconnected", socket.id);
-  });
-});
-
-// Health check endpoint
-app.get("/health", (req, res) => {
-  res.json({
-    status: "OK",
-    activeUsers: activeUsers.size,
-    drawingEvents: drawingHistory.length,
-  });
-});
+setupWhiteboardSocket(io);
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`check: http://localhost:${PORT}/health`);
-});
+
+(async () => {
+  const dbOk = await connectDb();
+  if (!dbOk) {
+    console.warn(
+      "[startup] Room API will return errors until MongoDB connects — set MONGODB_URI in .env"
+    );
+  }
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Health: http://localhost:${PORT}/health`);
+  });
+})();
