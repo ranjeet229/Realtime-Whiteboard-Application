@@ -10,10 +10,11 @@ import {
   IconOutline,
 } from "./WhiteboardToolIcons.jsx";
 
-const SOCKET_URL =
-  process.env.NEXT_PUBLIC_SOCKET_URL ||
-  process.env.NEXT_PUBLIC_API_URL ||
+const rawSocket =
+  process.env.NEXT_PUBLIC_SOCKET_URL?.trim() ||
+  process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "http://localhost:5000";
+const SOCKET_URL = rawSocket.replace(/\/+$/, "");
 
 const SHAPE_TOOL_TYPES = [
   "line",

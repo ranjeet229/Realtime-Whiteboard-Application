@@ -1,4 +1,7 @@
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+const rawApi =
+  process.env.NEXT_PUBLIC_API_URL?.trim() || "http://localhost:5000";
+/** No trailing slash — avoids `https://host.com//api/...` when paths start with `/`. */
+const API = rawApi.replace(/\/+$/, "");
 
 /** Public JSON API (room create/join). Set auth + token if you add bearer APIs later. */
 export async function apiFetch(
