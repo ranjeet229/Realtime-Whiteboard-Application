@@ -24,9 +24,8 @@ function normalizeOrigin(url) {
 }
 
 /**
- * Allowed browser origins = CORS_ORIGINS (comma-separated) ∪ {FRONTEND_URL}.
- * Both env vars are merged so production Vercel URL in FRONTEND_URL still works
- * if CORS_ORIGINS was left as localhost-only.
+ * Strict allowlist (no wildcard). Sources: CORS_ORIGINS (comma-separated) ∪ FRONTEND_URL.
+ * On Render, if neither is set, the list stays empty so misconfiguration is obvious in logs.
  */
 function buildAllowedOrigins() {
   const parts = [];
@@ -44,7 +43,7 @@ function buildAllowedOrigins() {
     seen.add(n);
     list.push(n);
   }
-  if (list.length === 0) {
+  if (list.length === 0 && !process.env.RENDER) {
     list.push("http://localhost:3000");
   }
   return list;
@@ -52,22 +51,39 @@ function buildAllowedOrigins() {
 
 const allowedOrigins = buildAllowedOrigins();
 
-if (process.env.RENDER && !allowedOrigins.some((o) => /^https:/i.test(o))) {
-  console.warn(
-    "[cors] Render detected but no https:// origin in FRONTEND_URL / CORS_ORIGINS — " +
-      "set e.g. https://canvasquill.vercel.app or preflight will fail in the browser."
+if (process.env.RENDER) {
+  if (allowedOrigins.length === 0) {
+    console.error(
+      "[cors] Set CORS_ORIGINS and/or FRONTEND_URL on Render (e.g. https://canvasapp-beryl.vercel.app)."
+    );
+  } else if (!allowedOrigins.some((o) => /^https:/i.test(o))) {
+    console.warn(
+      "[cors] Render: no https:// origin in allowlist — browser preflight will fail."
+    );
+  }
+}
+
+/** Dynamic origin: reflect only when allowlisted (required pattern when credentials: true). */
+function corsOrigin(origin, callback) {
+  if (!origin) {
+    return callback(null, true);
+  }
+  return callback(
+    null,
+    allowedOrigins.includes(normalizeOrigin(origin))
   );
 }
 
-app.use(
-  cors({
-    origin: allowedOrigins,
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    optionsSuccessStatus: 204,
-  })
-);
+const corsOptions = {
+  origin: corsOrigin,
+  credentials: true,
+  methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
+  maxAge: 86400,
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 app.use("/api/rooms", roomRoutes);
@@ -87,8 +103,10 @@ app.get("/health", (req, res) => {
 const io = socketIo(server, {
   cors: {
     origin: allowedOrigins,
-    methods: ["GET", "POST", "OPTIONS"],
+    methods: ["GET", "HEAD", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
+    maxAge: 86400,
   },
 });
 
