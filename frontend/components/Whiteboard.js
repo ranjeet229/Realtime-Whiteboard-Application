@@ -377,6 +377,9 @@ export default function Whiteboard({
   /** Right “People” rail (does not cover tools sidebar) */
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [mySocketId, setMySocketId] = useState(null);
+  const [copyIdCopied, setCopyIdCopied] = useState(false);
+  const [copyLinkCopied, setCopyLinkCopied] = useState(false);
+  const copyFeedbackTimersRef = useRef({ id: null, link: null });
   const rafPreview = useRef(null);
   const lastCursorEmit = useRef(0);
   const historyRef = useRef([]);
@@ -386,6 +389,14 @@ export default function Whiteboard({
   useEffect(() => {
     historyRef.current = history;
   }, [history]);
+
+  useEffect(() => {
+    const t = copyFeedbackTimersRef.current;
+    return () => {
+      if (t.id) clearTimeout(t.id);
+      if (t.link) clearTimeout(t.link);
+    };
+  }, []);
 
   const palette = [
     "#000000",
@@ -821,6 +832,13 @@ export default function Whiteboard({
   const copyRoomId = async () => {
     try {
       await navigator.clipboard.writeText(roomId);
+      const timers = copyFeedbackTimersRef.current;
+      if (timers.id) clearTimeout(timers.id);
+      setCopyIdCopied(true);
+      timers.id = setTimeout(() => {
+        setCopyIdCopied(false);
+        timers.id = null;
+      }, 2000);
     } catch {
       /* ignore */
     }
@@ -829,6 +847,13 @@ export default function Whiteboard({
   const copyInvite = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
+      const timers = copyFeedbackTimersRef.current;
+      if (timers.link) clearTimeout(timers.link);
+      setCopyLinkCopied(true);
+      timers.link = setTimeout(() => {
+        setCopyLinkCopied(false);
+        timers.link = null;
+      }, 2000);
     } catch {
       /* ignore */
     }
@@ -919,17 +944,17 @@ export default function Whiteboard({
             type="button"
             onClick={copyRoomId}
             title="Copy ID"
-            className="cursor-pointer text-[11px] font-medium rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700"
+            className="cursor-pointer text-[11px] font-medium rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 min-w-[4.75rem]"
           >
-            Copy ID
+            {copyIdCopied ? "Copied!" : "Copy ID"}
           </button>
           <button
             type="button"
             onClick={copyInvite}
             title="Copy link"
-            className="cursor-pointer text-[11px] font-medium rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700"
+            className="cursor-pointer text-[11px] font-medium rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-700 min-w-[4.75rem]"
           >
-            Copy link
+            {copyLinkCopied ? "Copied!" : "Copy link"}
           </button>
           <button
             type="button"

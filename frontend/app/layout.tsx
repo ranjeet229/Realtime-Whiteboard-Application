@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CanvasQuill — Collaborative whiteboard",
+  title: "CanvasQuill",
   description:
     "Private rooms, real-time drawing, roles, and exports — built for focused collaboration.",
   icons: {
