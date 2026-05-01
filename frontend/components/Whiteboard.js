@@ -22,6 +22,21 @@ const rawSocket =
   "http://localhost:5000";
 const SOCKET_URL = rawSocket.replace(/\/+$/, "");
 
+/** Read room JWT payload (client) for stable userKey matching server collab. */
+function parseRoomJwtPayload(token) {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length < 2) return null;
+    let b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    while (b64.length % 4) b64 += "=";
+    if (typeof atob === "undefined") return null;
+    const json = atob(b64);
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
 const SHAPE_TOOL_TYPES = [
   "line",
   "rectangle",
@@ -1180,6 +1195,9 @@ export default function Whiteboard({
   const [shapeStart, setShapeStart] = useState(null);
   const [history, setHistory] = useState([]);
   const [participants, setParticipants] = useState([]);
+  const [myUserKey, setMyUserKey] = useState("");
+  /** Live draw capability (JWT + host overrides via `draw_permission`). */
+  const [drawPermission, setDrawPermission] = useState(canDraw);
   const [cursors, setCursors] = useState({});
   const [socketError, setSocketError] = useState("");
   /** Tool sidebar: open on first load; user toggles via Tools header */
@@ -1252,6 +1270,19 @@ export default function Whiteboard({
   useEffect(() => {
     historyRef.current = history;
   }, [history]);
+
+  useEffect(() => {
+    setDrawPermission(canDraw);
+  }, [drawPermission]);
+
+  useEffect(() => {
+    const p = parseRoomJwtPayload(roomToken);
+    const key =
+      (p?.userId != null && String(p.userId)) ||
+      (p?.guestId != null && String(p.guestId)) ||
+      "";
+    setMyUserKey(key);
+  }, [roomToken]);
 
   useEffect(() => {
     moveSelectionRef.current = moveSelection;
@@ -1332,7 +1363,7 @@ export default function Whiteboard({
       .slice(0, MAX_TEXT_CHARS);
     textDraftRef.current = "";
     setTextComposer(null);
-    if (!trimmed || !canDraw) return;
+    if (!trimmed || !drawPermission) return;
     const fontSize = fontPxFromPenSize(currentSize);
     const pageId =
       prev.pageId ||
@@ -1355,7 +1386,7 @@ export default function Whiteboard({
       requestAnimationFrame(() => redrawCanvas(next));
       return next;
     });
-  }, [canDraw, currentColor, currentSize, redrawCanvas]);
+  }, [drawPermission, currentColor, currentSize, redrawCanvas]);
 
   useEffect(() => {
     if (currentTool !== "text" && textComposerRef.current) {
@@ -1415,6 +1446,9 @@ export default function Whiteboard({
       setIsConnected(true);
       setSocketError("");
       setMySocketId(newSocket.id);
+    });
+    newSocket.on("draw_permission", ({ canDraw: allowed }) => {
+      if (typeof allowed === "boolean") setDrawPermission(allowed);
     });
     newSocket.on("disconnect", () => setIsConnected(false));
     newSocket.on("connect_error", (err) => {
@@ -1638,8 +1672,8 @@ export default function Whiteboard({
   }, [peopleOpen]);
 
   useEffect(() => {
-    if (!canDraw) setExtraColorMenuOpen(false);
-  }, [canDraw]);
+    if (!drawPermission) setExtraColorMenuOpen(false);
+  }, [drawPermission]);
 
   useEffect(() => {
     setRecentColorHexes(readRecentColorsFromStorage());
@@ -1805,7 +1839,7 @@ export default function Whiteboard({
   };
 
   const tryMovePointerDown = (e) => {
-    if (!canDraw || currentTool !== "move") return;
+    if (!drawPermission || currentTool !== "move") return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     e.preventDefault();
@@ -2056,7 +2090,7 @@ export default function Whiteboard({
   };
 
   const handleCanvasPointerDown = (e) => {
-    if (!canDraw) return;
+    if (!drawPermission) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if (currentTool === "text") {
       e.preventDefault();
@@ -2158,7 +2192,7 @@ export default function Whiteboard({
   );
 
   const startDrawing = (e) => {
-    if (!canDraw) return;
+    if (!drawPermission) return;
     if (currentTool === "move") return;
     e.preventDefault();
     const pos = getCanvasPos(e);
@@ -2200,7 +2234,7 @@ export default function Whiteboard({
     emitCursorFromEvent(e);
     const pos = getCanvasPos(e);
 
-    if (!isDrawing || !canvasRef.current || !canDraw) return;
+    if (!isDrawing || !canvasRef.current || !drawPermission) return;
     e.preventDefault();
     const ctx = canvasRef.current.getContext("2d");
 
@@ -2364,19 +2398,19 @@ export default function Whiteboard({
 
   const undoLastRef = useRef(() => {});
   undoLastRef.current = () => {
-    if (!canDraw || !socket?.connected) return;
+    if (!drawPermission || !socket?.connected) return;
     socket.emit("undo_last");
   };
 
   const redoLastRef = useRef(() => {});
   redoLastRef.current = () => {
-    if (!canDraw || !socket?.connected) return;
+    if (!drawPermission || !socket?.connected) return;
     socket.emit("redo_last");
   };
 
   const deleteMoveSelectionRef = useRef(() => {});
   deleteMoveSelectionRef.current = () => {
-    if (!canDraw || currentTool !== "move") return;
+    if (!drawPermission || currentTool !== "move") return;
     const ids = [...moveSelectionRef.current];
     if (ids.length === 0) return;
     moveSessionRef.current = null;
@@ -2396,7 +2430,7 @@ export default function Whiteboard({
 
   const placeImageFromFile = useCallback(
     (file, cx, cy) => {
-      if (!canDraw || !file?.type?.startsWith?.("image/")) return;
+      if (!drawPermission || !file?.type?.startsWith?.("image/")) return;
       const canvas = canvasRef.current;
       if (!canvas) return;
       const reader = new FileReader();
@@ -2436,28 +2470,28 @@ export default function Whiteboard({
       };
       reader.readAsDataURL(file);
     },
-    [canDraw, redrawCanvas]
+    [drawPermission, redrawCanvas]
   );
 
   const addCanvasPage = useCallback(() => {
-    if (!canDraw || !socket?.connected) return;
+    if (!drawPermission || !socket?.connected) return;
     socket.emit("add_canvas_page", {});
     setPagesMenuOpen(false);
-  }, [canDraw, socket]);
+  }, [drawPermission, socket]);
 
   const deleteCanvasPage = useCallback(
     (pageId) => {
-      if (!canDraw || !socket?.connected || !pageId) return;
+      if (!drawPermission || !socket?.connected || !pageId) return;
       if (canvasPages.length <= 1) return;
       socket.emit("delete_canvas_page", { pageId });
       setPagesMenuOpen(false);
     },
-    [canDraw, socket, canvasPages.length]
+    [drawPermission, socket, canvasPages.length]
   );
 
   const applyImageResize = useCallback(
     (groupId, newScale) => {
-      if (!canDraw || !groupId) return;
+      if (!drawPermission || !groupId) return;
       setHistory((prev) => {
         const idx = prev.findIndex(
           (evt) => evt.groupId === groupId && evt.type === "image"
@@ -2480,12 +2514,12 @@ export default function Whiteboard({
         return next;
       });
     },
-    [canDraw, redrawCanvas]
+    [drawPermission, redrawCanvas]
   );
 
   const moveSelectionToPage = useCallback(
     (pageId) => {
-      if (!canDraw || !pageId || !socket?.connected) return;
+      if (!drawPermission || !pageId || !socket?.connected) return;
       const ids = [...moveSelectionRef.current];
       if (!ids.length) return;
       socket.emit("set_groups_page", { groupIds: ids, pageId });
@@ -2499,11 +2533,11 @@ export default function Whiteboard({
         return next;
       });
     },
-    [canDraw, socket, redrawCanvas]
+    [drawPermission, socket, redrawCanvas]
   );
 
   const handleCanvasDragOver = (e) => {
-    if (!canDraw) return;
+    if (!drawPermission) return;
     e.preventDefault();
     try {
       e.dataTransfer.dropEffect = "copy";
@@ -2513,7 +2547,7 @@ export default function Whiteboard({
   };
 
   const handleCanvasDrop = (e) => {
-    if (!canDraw) return;
+    if (!drawPermission) return;
     e.preventDefault();
     const f = e.dataTransfer?.files?.[0];
     if (!f?.type?.startsWith?.("image/")) return;
@@ -2676,7 +2710,7 @@ export default function Whiteboard({
       if (e.target?.isContentEditable) return;
       if (
         (e.key === "Delete" || e.key === "Backspace") &&
-        canDraw &&
+        drawPermission &&
         currentToolRef.current === "move" &&
         moveSelectionRef.current.length > 0
       ) {
@@ -2712,7 +2746,7 @@ export default function Whiteboard({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canDraw]);
+  }, [drawPermission]);
 
   const drawTools = shapeOptions.filter((o) => o.group === "draw");
   const shapeTools = shapeOptions.filter((o) => o.group === "shapes");
@@ -2736,8 +2770,25 @@ export default function Whiteboard({
 
   const peopleRows = useMemo(() => {
     if (sortedPeople.length > 0) return sortedPeople;
-    return [{ socketId: mySocketId || "__local__", displayName, role }];
-  }, [sortedPeople, mySocketId, displayName, role]);
+    return [
+      {
+        socketId: mySocketId || "__local__",
+        displayName,
+        role,
+        userKey: myUserKey || undefined,
+        canDraw: drawPermission,
+      },
+    ];
+  }, [sortedPeople, mySocketId, displayName, role, myUserKey, drawPermission]);
+
+  const hostSetParticipantDraw = useCallback((targetUserKey, nextCanDraw) => {
+    const s = socketRef.current;
+    if (!s?.connected || !targetUserKey) return;
+    s.emit("host_set_participant_draw", {
+      targetUserKey,
+      canDraw: nextCanDraw,
+    });
+  }, []);
 
   const filteredExtraColorSwatches = useMemo(() => {
     const q = extraColorSearch.trim().toLowerCase().replace(/^#/, "");
@@ -2887,7 +2938,7 @@ export default function Whiteboard({
                       <button
                         type="button"
                         disabled={
-                          canvasPages.length <= 1 || !canDraw || !isConnected
+                          canvasPages.length <= 1 || !drawPermission || !isConnected
                         }
                         title={
                           canvasPages.length <= 1
@@ -2913,7 +2964,7 @@ export default function Whiteboard({
                 </ul>
                 <button
                   type="button"
-                  disabled={!canDraw || !isConnected}
+                  disabled={!drawPermission || !isConnected}
                   title="Add a new blank page (like slides)"
                   className="w-full border-t border-cq-border px-2.5 py-2 text-left text-xs font-medium text-[var(--cq-accent)] hover:bg-cq-raised disabled:cursor-not-allowed disabled:opacity-40"
                   onClick={() => addCanvasPage()}
@@ -2932,7 +2983,7 @@ export default function Whiteboard({
           />
           <button
             type="button"
-            disabled={!canDraw}
+            disabled={!drawPermission}
             onClick={() => imageFileInputRef.current?.click()}
             title="Add image — also drag & drop onto the canvas"
             className="cq-btn-ghost cq-transition inline-flex min-w-0 items-center gap-1.5 px-2"
@@ -3003,7 +3054,7 @@ export default function Whiteboard({
           <button
             type="button"
             onClick={() => undoLastRef.current()}
-            disabled={!canDraw}
+            disabled={!drawPermission}
             title="Undo (Ctrl+Z)"
             aria-label="Undo"
             className="cq-btn-ghost cq-transition inline-flex min-w-0 items-center justify-center px-2 disabled:cursor-not-allowed disabled:opacity-40"
@@ -3013,7 +3064,7 @@ export default function Whiteboard({
           <button
             type="button"
             onClick={() => redoLastRef.current()}
-            disabled={!canDraw}
+            disabled={!drawPermission}
             title="Redo (Ctrl+Y or Ctrl+Shift+Z)"
             aria-label="Redo"
             className="cq-btn-ghost cq-transition inline-flex min-w-0 items-center justify-center px-2 disabled:cursor-not-allowed disabled:opacity-40"
@@ -3091,7 +3142,7 @@ export default function Whiteboard({
           </div>
 
           <div className="flex-1 overflow-y-auto px-2 py-2.5 space-y-3 min-w-[13.5rem] [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:w-0 [&::-webkit-scrollbar]:h-0">
-            {!canDraw && (
+            {!drawPermission && (
               <p className="text-[11px] text-cq-warn">View-only — drawing is disabled.</p>
             )}
 
@@ -3125,7 +3176,7 @@ export default function Whiteboard({
                     )}
                   </button>
                 ))}
-                {canDraw &&
+                {drawPermission &&
                   currentTool === "move" &&
                   moveSelection.length > 0 && (
                     <button
@@ -3175,7 +3226,7 @@ export default function Whiteboard({
               >
                 <button
                   type="button"
-                  disabled={!canDraw || !FILL_CAPABLE_SHAPES.has(currentTool)}
+                  disabled={!drawPermission || !FILL_CAPABLE_SHAPES.has(currentTool)}
                   onClick={() => setShapeFilled(true)}
                   title="Fill"
                   aria-label="Fill"
@@ -3190,7 +3241,7 @@ export default function Whiteboard({
                 </button>
                 <button
                   type="button"
-                  disabled={!canDraw || !FILL_CAPABLE_SHAPES.has(currentTool)}
+                  disabled={!drawPermission || !FILL_CAPABLE_SHAPES.has(currentTool)}
                   onClick={() => setShapeFilled(false)}
                   title="Outline"
                   aria-label="Outline"
@@ -3218,7 +3269,7 @@ export default function Whiteboard({
                       <button
                         key={hex}
                         type="button"
-                        disabled={!canDraw}
+                        disabled={!drawPermission}
                         title={label}
                         aria-label={label}
                         className={`h-7 w-7 shrink-0 rounded-full border-2 cq-transition ${
@@ -3237,7 +3288,7 @@ export default function Whiteboard({
                   <input
                     type="color"
                     value={currentColor}
-                    disabled={!canDraw}
+                    disabled={!drawPermission}
                     onChange={(e) => {
                       const n = normalizeHexColor(e.target.value);
                       if (n) {
@@ -3257,7 +3308,7 @@ export default function Whiteboard({
                   <div className="relative" ref={extraColorMenuRef}>
                     <button
                       type="button"
-                      disabled={!canDraw}
+                      disabled={!drawPermission}
                       title="click to open more colors"
                       aria-expanded={extraColorMenuOpen}
                       aria-haspopup="listbox"
@@ -3349,7 +3400,7 @@ export default function Whiteboard({
                 type="range"
                 min="1"
                 max="70"
-                disabled={!canDraw}
+                disabled={!drawPermission}
                 title="Size"
                 aria-label="Size"
                 value={
@@ -3422,7 +3473,7 @@ export default function Whiteboard({
               <canvas
                 ref={canvasRef}
                 className={`absolute inset-0 block h-full w-full touch-none ${
-                  !canDraw
+                  !drawPermission
                     ? "cursor-not-allowed opacity-90"
                     : currentTool === "move"
                     ? moveDragging
@@ -3450,7 +3501,7 @@ export default function Whiteboard({
               />
               {textComposer &&
                 textComposer.pageId === activePageId &&
-                canDraw && (
+                drawPermission && (
                   <input
                     key={textComposer.key}
                     ref={textInputRef}
@@ -3542,6 +3593,10 @@ export default function Whiteboard({
                     mySocketId && p.socketId === mySocketId
                       ? true
                       : p.socketId === "__local__";
+                  const samePersonAsYou =
+                    Boolean(
+                      p.userKey && myUserKey && p.userKey === myUserKey
+                    ) || isYou;
                   const hue = avatarHueFromName(p.displayName);
                   return (
                     <li
@@ -3568,8 +3623,58 @@ export default function Whiteboard({
                         </div>
                         <div className="text-xs capitalize text-cq-muted">
                           {p.role}
+                          {typeof p.canDraw === "boolean" && p.role !== "host" ? (
+                            <span className="text-cq-faint">
+                              {" · "}
+                              {p.canDraw ? "Can draw" : "View only"}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
+                      {role === "host" &&
+                      p.userKey &&
+                      !samePersonAsYou &&
+                      p.role !== "host" ? (
+                        p.role === "viewer" ? (
+                          <span
+                            className="shrink-0 rounded-md border border-cq-border-subtle px-1.5 py-1 text-[10px] font-medium text-cq-muted"
+                            title="This person joined as a viewer. They need an editor invite link to draw; you cannot enable drawing from here."
+                          >
+                            View
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={p.canDraw}
+                            aria-label={
+                              p.canDraw
+                                ? `${p.displayName}: can draw; switch to view-only`
+                                : `${p.displayName}: view-only; allow drawing`
+                            }
+                            title={
+                              p.canDraw
+                                ? "Switch this person to view-only (they stay in the room)"
+                                : "Allow this person to draw again"
+                            }
+                            onClick={() =>
+                              hostSetParticipantDraw(p.userKey, !p.canDraw)
+                            }
+                            className={`relative h-6 w-10 shrink-0 rounded-full border p-0.5 transition-colors ${
+                              p.canDraw
+                                ? "border-emerald-700/35 bg-emerald-600"
+                                : "border-cq-border bg-cq-surface-soft"
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none absolute left-0.5 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-white shadow ring-1 ring-black/10 transition-transform duration-200 ease-out motion-reduce:transition-none ${
+                                p.canDraw ? "translate-x-4" : "translate-x-0"
+                              }`}
+                              aria-hidden
+                            />
+                          </button>
+                        )
+                      ) : null}
                     </li>
                   );
                 })}
@@ -3579,7 +3684,7 @@ export default function Whiteboard({
         </div>
       </div>
 
-      {selectedImageForPanel && canDraw && (
+      {selectedImageForPanel && drawPermission && (
         <div
           role="dialog"
           aria-label="Image size"

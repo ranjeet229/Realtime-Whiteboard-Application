@@ -74,10 +74,19 @@ function setupWhiteboardSocket(io) {
         revision: 0,
         /** @type {Map<string, object[]>} userKey|socketId -> redo stack (in-memory only) */
         redoStacks: new Map(),
+        /** userKeys the host has put in view-only (runtime; cleared on server restart) */
+        drawBanByUserKey: new Set(),
       });
     const b = roomMeta.get(roomId);
     if (!b.redoStacks) b.redoStacks = new Map();
+    if (!b.drawBanByUserKey) b.drawBanByUserKey = new Set();
     return b;
+  }
+
+  function computeEffectiveDraw(scope, role, userKey, bucket) {
+    if (role === "viewer") return false;
+    if (bucket.drawBanByUserKey?.has(userKey)) return false;
+    return scope.draw === true;
   }
 
   function clearRedoForKey(bucket, key) {
@@ -209,13 +218,13 @@ function setupWhiteboardSocket(io) {
   io.on("connection", async (socket) => {
     const scope = socket.roomScope;
     const roomId = scope.roomId;
-    const canDraw = scope.draw === true;
     const displayName = scope.displayName || "User";
     const role = scope.role || "editor";
     const userKey = scope.userId || scope.guestId || socket.id;
 
     await loadRoomHistory(roomId);
     const bucket = getBucket(roomId);
+    const effectiveDraw = computeEffectiveDraw(scope, role, userKey, bucket);
 
     socket.join(roomId);
     socket.data.collab = {
@@ -223,11 +232,60 @@ function setupWhiteboardSocket(io) {
       userKey,
       displayName,
       role,
-      canDraw,
+      canDraw: effectiveDraw,
     };
+
+    socket.emit("draw_permission", { canDraw: effectiveDraw });
 
     io.to(roomId).emit("participants_update", {
       participants: buildParticipantList(io, roomId),
+    });
+
+    socket.on("host_set_participant_draw", (payload) => {
+      if (socket.data.collab.role !== "host") return;
+      const targetKey =
+        typeof payload?.targetUserKey === "string"
+          ? payload.targetUserKey.trim()
+          : "";
+      const wantDraw = payload?.canDraw === true;
+      if (!targetKey || targetKey === userKey) return;
+
+      const roomSet = io.sockets.adapter.rooms.get(roomId);
+      if (!roomSet) return;
+
+      let seenRole = null;
+      for (const sid of roomSet) {
+        const s = io.sockets.sockets.get(sid);
+        const c = s?.data?.collab;
+        if (!c || c.userKey !== targetKey) continue;
+        seenRole = c.role;
+        break;
+      }
+      if (seenRole == null) return;
+      if (seenRole === "host") return;
+      if (seenRole === "viewer" && wantDraw) return;
+
+      if (wantDraw) bucket.drawBanByUserKey.delete(targetKey);
+      else bucket.drawBanByUserKey.add(targetKey);
+
+      for (const sid of roomSet) {
+        const s = io.sockets.sockets.get(sid);
+        if (!s?.data?.collab || s.data.collab.userKey !== targetKey) continue;
+        const sc = s.roomScope;
+        if (!sc) continue;
+        const next = computeEffectiveDraw(
+          sc,
+          s.data.collab.role,
+          targetKey,
+          bucket
+        );
+        s.data.collab.canDraw = next;
+        s.emit("draw_permission", { canDraw: next });
+      }
+
+      io.to(roomId).emit("participants_update", {
+        participants: buildParticipantList(io, roomId),
+      });
     });
 
     socket.emit("drawing_history", {
@@ -587,8 +645,10 @@ function buildParticipantList(io, roomId) {
     if (!s?.data?.collab) continue;
     list.push({
       socketId,
+      userKey: s.data.collab.userKey,
       displayName: s.data.collab.displayName,
       role: s.data.collab.role,
+      canDraw: !!s.data.collab.canDraw,
     });
   }
   return list;
