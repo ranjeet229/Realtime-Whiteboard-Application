@@ -25,6 +25,7 @@ router.post("/", async (req, res) => {
     if (!hostDisplay)
       return res.status(400).json({ error: "Display name is required" });
     const roomId = crypto.randomUUID();
+    const firstPageId = crypto.randomUUID();
     let passwordHash = null;
     if (password && String(password).length > 0)
       passwordHash = await bcrypt.hash(String(password), 10);
@@ -35,6 +36,7 @@ router.post("/", async (req, res) => {
       passwordHash,
       title: title ? String(title).slice(0, 120) : "Untitled board",
       strokes: [],
+      canvasPages: [{ id: firstPageId, title: "Page 1" }],
       revision: 0,
     });
     const roomToken = signRoomToken({

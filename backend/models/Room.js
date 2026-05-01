@@ -15,6 +15,16 @@ const roomSchema = new mongoose.Schema(
     passwordHash: { type: String, default: null },
     title: { type: String, default: "Untitled board" },
     strokes: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    /** Slide deck: each stroke has optional `pageId` matching an entry here. */
+    canvasPages: {
+      type: [
+        new mongoose.Schema(
+          { id: { type: String, required: true }, title: { type: String, default: "Page" } },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
     revision: { type: Number, default: 0 },
   },
   { timestamps: true }

@@ -53,7 +53,7 @@ export function ThemeToggleButton({
   if (!mounted) {
     return (
       <span
-        className={`inline-flex h-9 w-9 shrink-0 cursor-pointer rounded-xl border border-slate-200 bg-white dark:border-slate-600 dark:bg-slate-800 ${className}`}
+        className={`inline-flex h-9 w-9 shrink-0 cursor-pointer rounded-cq-lg border border-slate-200 bg-white shadow-md dark:border-cq-border dark:bg-cq-surface-soft dark:shadow-cq-sm ${className}`}
         aria-hidden
       />
     );
@@ -73,7 +73,7 @@ function ThemeToggleButtonInner({ className }: { className?: string }) {
       title="Theme"
       aria-label="Theme"
       suppressHydrationWarning
-      className={`inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white text-amber-500 shadow-sm transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-amber-300 dark:hover:bg-slate-700 ${className}`}
+      className={`cq-transition inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-cq-lg border border-slate-200 bg-white text-amber-500 shadow-md hover:bg-slate-50 dark:border-cq-border dark:bg-cq-surface-soft dark:text-amber-300 dark:shadow-cq-sm dark:hover:border-cq-accent-soft dark:hover:bg-cq-raised ${className}`}
     >
       {isDark ? <IconSun /> : <IconMoon />}
     </button>

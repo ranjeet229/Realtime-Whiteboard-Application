@@ -76,14 +76,12 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-b from-slate-50 via-white to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-slate-900 dark:text-slate-100">
-      <header className="w-full border-b border-slate-200/80 dark:border-slate-800/80 backdrop-blur bg-white/70 dark:bg-slate-950/70 sticky top-0 z-20">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
-          <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-600 text-white text-sm font-bold shadow-lg shadow-indigo-500/30">
-              CQ
-            </span>
-            <span>CanvasQuill</span>
+    <div className="cq-shell flex flex-col">
+      <header className="cq-header-bar sticky top-0 z-20 w-full">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-6 px-5 py-4 md:px-6">
+          <Link href="/" className="flex items-center gap-3 font-semibold tracking-tight">
+            <span className="cq-logo-mark">CQ</span>
+            <span className="text-cq-text">CanvasQuill</span>
           </Link>
           <nav className="flex items-center gap-3 text-sm">
             <ThemeToggleButton />
@@ -91,13 +89,13 @@ export default function LandingPage() {
         </div>
       </header>
 
-      <main className="flex-1 max-w-6xl mx-auto px-4 py-16 md:py-24 w-full">
-        <div className="grid md:grid-cols-2 gap-12 items-center">
-          <div>
-            <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-slate-900 dark:text-white mb-4">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-14 md:px-6 md:py-20">
+        <div className="grid items-center gap-14 md:grid-cols-2 md:gap-16">
+          <div className="space-y-5">
+            <h1 className="text-3xl font-bold tracking-tight text-cq-text md:text-4xl md:leading-tight">
               Collaborate instantly on a shared canvas
             </h1>
-            <p className="text-base md:text-lg font-normal text-slate-600 dark:text-slate-400 leading-relaxed">
+            <p className="text-base font-normal leading-relaxed text-cq-muted md:text-lg">
               Create a private room, invite others, and start drawing together in real
               time.
             </p>
@@ -107,12 +105,12 @@ export default function LandingPage() {
             <form
               ref={createRoomCardRef}
               onSubmit={createRoom}
-              className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl p-6 space-y-4"
+              className="cq-card space-y-5 p-6 md:p-7"
             >
-              <h2 className="text-lg font-semibold">Create a room</h2>
+              <h2 className="text-lg font-semibold text-cq-text">Create a room</h2>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">
-                  Your name <span className="text-red-500">*</span> (shown to others)
+                <label className="cq-label">
+                  Your name <span className="text-cq-danger">*</span> (shown to others)
                 </label>
                 <input
                   type="text"
@@ -124,39 +122,33 @@ export default function LandingPage() {
                   maxLength={48}
                   autoComplete="name"
                   aria-invalid={nameFieldError ? "true" : "false"}
-                  className={`w-full rounded-lg border px-3 py-2 outline-none transition focus:ring-2 focus:ring-indigo-500 ${
-                    nameFieldError
-                      ? "border-red-500 bg-red-50 ring-2 ring-red-200 dark:border-red-500 dark:bg-red-950/40 dark:ring-red-900/50"
-                      : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-950"
-                  }`}
+                  className={`cq-input cq-transition ${nameFieldError ? "cq-input-error" : ""}`}
                   placeholder="your name"
                   suppressHydrationWarning
                 />
                 {nameFieldError ? (
-                  <p className="mt-1.5 text-sm text-red-600 dark:text-red-400" role="alert">
+                  <p className="mt-2 text-sm text-cq-danger" role="alert">
                     {nameFieldError}
                   </p>
                 ) : null}
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">
-                  Optional room password
-                </label>
+                <label className="cq-label">Optional room password</label>
                 <input
                   type="password"
                   value={createPassword}
                   onChange={(e) => setCreatePassword(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="cq-input cq-transition"
                   placeholder="Leave empty for link-only access"
                   suppressHydrationWarning
                 />
               </div>
-              {msg && <p className="text-sm text-red-600 dark:text-red-400">{msg}</p>}
+              {msg && <p className="text-sm text-cq-danger">{msg}</p>}
               <button
                 type="submit"
                 disabled={busy}
                 suppressHydrationWarning
-                className="w-full cursor-pointer rounded-xl bg-indigo-600 py-3 font-medium text-white shadow-lg shadow-indigo-500/25 transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                className="cq-btn-primary cq-transition"
               >
                 {busy ? "Creating…" : "Create room"}
               </button>
@@ -164,26 +156,20 @@ export default function LandingPage() {
 
             <form
               onSubmit={goJoin}
-              className="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white/80 p-6 shadow-none backdrop-blur transition-shadow duration-200 hover:shadow-xl dark:border-slate-800 dark:bg-slate-900/80"
+              className="cq-card-subtle cq-transition flex flex-col gap-5 p-6 md:p-7"
             >
-              <h2 className="text-lg font-semibold">Join a room</h2>
+              <h2 className="text-lg font-semibold text-cq-text">Join a room</h2>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">
-                  Room ID
-                </label>
+                <label className="cq-label">Room ID</label>
                 <input
                   value={roomInput}
                   onChange={(e) => setRoomInput(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="cq-input cq-transition text-sm"
                   placeholder="room id"
                   suppressHydrationWarning
                 />
               </div>
-              <button
-                type="submit"
-                suppressHydrationWarning
-                className="w-full cursor-pointer rounded-xl border border-slate-200 py-3 font-medium transition hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
-              >
+              <button type="submit" suppressHydrationWarning className="cq-btn-secondary cq-transition">
                 Continue
               </button>
             </form>
