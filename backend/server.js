@@ -18,10 +18,39 @@ const { setupWhiteboardSocket } = require("./socket/whiteboardSocket");
 const app = express();
 const server = http.createServer(app);
 
-const allowedOrigins = (process.env.CORS_ORIGINS || process.env.FRONTEND_URL || "http://localhost:3000")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+/** Strip trailing slashes so browser Origin matches (browsers never send trailing /). */
+function normalizeOrigin(url) {
+  return String(url || "").trim().replace(/\/+$/, "");
+}
+
+/**
+ * Allowed browser origins = CORS_ORIGINS (comma-separated) ∪ {FRONTEND_URL}.
+ * Both env vars are merged so production Vercel URL in FRONTEND_URL still works
+ * if CORS_ORIGINS was left as localhost-only.
+ */
+function buildAllowedOrigins() {
+  const parts = [];
+  if (process.env.CORS_ORIGINS) {
+    parts.push(...process.env.CORS_ORIGINS.split(","));
+  }
+  if (process.env.FRONTEND_URL) {
+    parts.push(process.env.FRONTEND_URL);
+  }
+  const seen = new Set();
+  const list = [];
+  for (const p of parts) {
+    const n = normalizeOrigin(p);
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    list.push(n);
+  }
+  if (list.length === 0) {
+    list.push("http://localhost:3000");
+  }
+  return list;
+}
+
+const allowedOrigins = buildAllowedOrigins();
 
 app.use(
   cors({
@@ -48,7 +77,7 @@ app.get("/health", (req, res) => {
 const io = socketIo(server, {
   cors: {
     origin: allowedOrigins,
-    methods: ["GET", "POST"],
+    methods: ["GET", "POST", "OPTIONS"],
     credentials: true,
   },
 });
@@ -67,5 +96,6 @@ const PORT = process.env.PORT || 5000;
   server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Health: http://localhost:${PORT}/health`);
+    console.log("[cors] allowed origins:", allowedOrigins.join(", ") || "(none)");
   });
 })();
