@@ -8,7 +8,9 @@ const { signRoomToken } = require("../middleware/authMiddleware");
 const router = express.Router();
 
 const DB_UNAVAILABLE =
-  "Database unavailable. Set MONGODB_URI in backend/.env to your MongoDB connection string, then restart the server.";
+  process.env.RENDER
+    ? "Database unavailable. Set MONGODB_URI in Render → Environment to your MongoDB Atlas connection string, then redeploy or restart the service."
+    : "Database unavailable. Set MONGODB_URI in backend/.env to your MongoDB connection string, then restart the server.";
 
 function dbReady() {
   return mongoose.connection.readyState === 1;
