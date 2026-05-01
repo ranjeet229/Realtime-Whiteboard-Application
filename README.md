@@ -1,4 +1,4 @@
-# 🖌️ RealTime Whiteboard canvasQill
+# 🖌️ RealTime Whiteboard canvasQuill
 **Deploy Link:** [https://canvasapp-beryl.vercel.app/](https://canvasapp-beryl.vercel.app/)  
 
 A collaborative whiteboard application built with **Next.js**, **Express.js**, and **WebSockets** that lets multiple users draw together in real time.  
