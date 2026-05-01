@@ -1,5 +1,5 @@
 # 🖌️ RealTime Whiteboard  
-**Deploy Link:** [https://rtwhiteboard.vercel.app/](https://rtwhiteboard.vercel.app/)  
+**Deploy Link:** [https://rtwhiteboard.vercel.app/](https://canvasapp-beryl.vercel.app/)  
 
 A collaborative whiteboard application built with **Next.js**, **Express.js**, and **WebSockets** that lets multiple users draw together in real time.  
 It supports freehand drawing, erasing, color selection, and shape tools, all synced instantly across connected users.
