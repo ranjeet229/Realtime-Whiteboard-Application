@@ -52,10 +52,20 @@ function buildAllowedOrigins() {
 
 const allowedOrigins = buildAllowedOrigins();
 
+if (process.env.RENDER && !allowedOrigins.some((o) => /^https:/i.test(o))) {
+  console.warn(
+    "[cors] Render detected but no https:// origin in FRONTEND_URL / CORS_ORIGINS — " +
+      "set e.g. https://canvasquill.vercel.app or preflight will fail in the browser."
+  );
+}
+
 app.use(
   cors({
     origin: allowedOrigins,
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    optionsSuccessStatus: 204,
   })
 );
 app.use(express.json());
