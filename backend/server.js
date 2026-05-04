@@ -100,7 +100,11 @@ app.get("/health", (req, res) => {
   });
 });
 
+/** Default Engine.IO limit is 1MB; image strokes use base64 data URLs (see MAX_IMAGE_DATA_URL_CHARS in whiteboardSocket). */
+const SOCKET_MAX_HTTP_BUFFER_BYTES = 12 * 1024 * 1024;
+
 const io = socketIo(server, {
+  maxHttpBufferSize: SOCKET_MAX_HTTP_BUFFER_BYTES,
   cors: {
     origin: allowedOrigins,
     methods: ["GET", "HEAD", "POST", "OPTIONS"],

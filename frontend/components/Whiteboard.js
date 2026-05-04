@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import io from "socket.io-client";
 import Link from "next/link";
 import { ThemeToggleButton } from "./ThemeToggleButton";
+import ImageCropModal from "./ImageCropModal";
 import { IconSidebarClosed, IconSidebarOpen } from "./SidebarPanelIcons";
 import {
   ToolRailIcon,
@@ -367,6 +368,32 @@ function resizeImageStrokeByScale(stroke, newScale) {
     toX: cx + w / 2,
     toY: cy + h / 2,
     imageScale: sc,
+  };
+}
+
+/** Keeps canvas width; height follows new aspect ratio; same center. */
+function recomputeImageBoundsAfterCrop(prev, cropW, cropH, newDataUrl) {
+  if (prev.type !== "image" || !cropW || !cropH) return prev;
+  const W = Math.abs(prev.toX - prev.fromX);
+  const cx = (prev.fromX + prev.toX) / 2;
+  const cy = (prev.fromY + prev.toY) / 2;
+  let imageScale = W / Math.max(1, cropW);
+  imageScale = Math.max(
+    IMAGE_SCALE_SLIDER_MIN,
+    Math.min(IMAGE_SCALE_SLIDER_MAX, imageScale)
+  );
+  const wDisp = cropW * imageScale;
+  const hDisp = cropH * imageScale;
+  return {
+    ...prev,
+    dataUrl: newDataUrl,
+    naturalWidth: cropW,
+    naturalHeight: cropH,
+    imageScale,
+    fromX: cx - wDisp / 2,
+    fromY: cy - hDisp / 2,
+    toX: cx + wDisp / 2,
+    toY: cy + hDisp / 2,
   };
 }
 
@@ -1216,6 +1243,8 @@ export default function Whiteboard({
   const [moveDragging, setMoveDragging] = useState(false);
   /** groupIds selected for Move tool (Shift+click, marquee, …). */
   const [moveSelection, setMoveSelection] = useState([]);
+  /** `{ groupId, sourceDataUrl, initialCropRect? }` while crop dialog is open */
+  const [imageCropModal, setImageCropModal] = useState(null);
   /** Marquee selection rect in canvas CSS px while dragging on empty canvas. */
   const [marqueeRect, setMarqueeRect] = useState(null);
   /** During move drag, offset so selection outline tracks the preview. */
@@ -1553,6 +1582,60 @@ export default function Whiteboard({
                 Number.isFinite(p.imageScale)
                   ? { imageScale: p.imageScale }
                   : {}),
+              }
+            : evt
+        );
+        historyRef.current = next;
+        requestAnimationFrame(() => redrawCanvas(next));
+        return next;
+      });
+    });
+
+    newSocket.on("image_group_replaced", (p) => {
+      const groupId = p?.groupId;
+      const dataUrl = p?.dataUrl;
+      if (!groupId || typeof dataUrl !== "string") return;
+      const nw = Number(p?.naturalWidth);
+      const nh = Number(p?.naturalHeight);
+      const fx = Number(p?.fromX);
+      const fy = Number(p?.fromY);
+      const tx = Number(p?.toX);
+      const ty = Number(p?.toY);
+      if (![nw, nh, fx, fy, tx, ty].every(Number.isFinite)) return;
+      const cr = p?.cropRectOnSource;
+      const crx = cr && Number(cr.x);
+      const cry = cr && Number(cr.y);
+      const crw = cr && Number(cr.w);
+      const crh = cr && Number(cr.h);
+      const cropRectMerge =
+        cr &&
+        [crx, cry, crw, crh].every(Number.isFinite) &&
+        crw >= 1 &&
+        crh >= 1
+          ? { x: crx, y: cry, w: crw, h: crh }
+          : null;
+      const srcMerge =
+        typeof p.cropSourceDataUrl === "string" && p.cropSourceDataUrl.length > 0
+          ? p.cropSourceDataUrl
+          : null;
+      setHistory((prev) => {
+        const next = prev.map((evt) =>
+          evt.groupId === groupId && evt.type === "image"
+            ? {
+                ...evt,
+                dataUrl,
+                naturalWidth: nw,
+                naturalHeight: nh,
+                fromX: fx,
+                fromY: fy,
+                toX: tx,
+                toY: ty,
+                ...(typeof p.imageScale === "number" &&
+                Number.isFinite(p.imageScale)
+                  ? { imageScale: p.imageScale }
+                  : {}),
+                ...(srcMerge ? { cropSourceDataUrl: srcMerge } : {}),
+                ...(cropRectMerge ? { cropRectOnSource: cropRectMerge } : {}),
               }
             : evt
         );
@@ -2510,6 +2593,66 @@ export default function Whiteboard({
             toY: updated.toY,
             imageScale: updated.imageScale,
           });
+        requestAnimationFrame(() => redrawCanvas(next));
+        return next;
+      });
+    },
+    [drawPermission, redrawCanvas]
+  );
+
+  const applyImageCropReplace = useCallback(
+    (groupId, { croppedDataUrl, cropRectOnSource, cropSourceDataUrl }) => {
+      if (
+        !drawPermission ||
+        !groupId ||
+        !croppedDataUrl ||
+        !cropRectOnSource ||
+        typeof cropSourceDataUrl !== "string"
+      ) {
+        return;
+      }
+      const cropW = cropRectOnSource.w;
+      const cropH = cropRectOnSource.h;
+      if (!cropW || !cropH) return;
+      setHistory((prev) => {
+        const idx = prev.findIndex(
+          (evt) => evt.groupId === groupId && evt.type === "image"
+        );
+        if (idx < 0) return prev;
+        const geo = recomputeImageBoundsAfterCrop(
+          prev[idx],
+          cropW,
+          cropH,
+          croppedDataUrl
+        );
+        const updated = {
+          ...geo,
+          cropSourceDataUrl,
+          cropRectOnSource: {
+            x: cropRectOnSource.x,
+            y: cropRectOnSource.y,
+            w: cropRectOnSource.w,
+            h: cropRectOnSource.h,
+          },
+        };
+        const next = [...prev.slice(0, idx), updated, ...prev.slice(idx + 1)];
+        historyRef.current = next;
+        const s = socketRef.current;
+        if (s?.connected) {
+          s.emit("replace_image_group", {
+            groupId,
+            dataUrl: updated.dataUrl,
+            naturalWidth: updated.naturalWidth,
+            naturalHeight: updated.naturalHeight,
+            fromX: updated.fromX,
+            fromY: updated.fromY,
+            toX: updated.toX,
+            toY: updated.toY,
+            imageScale: updated.imageScale,
+            cropSourceDataUrl: updated.cropSourceDataUrl,
+            cropRectOnSource: updated.cropRectOnSource,
+          });
+        }
         requestAnimationFrame(() => redrawCanvas(next));
         return next;
       });
@@ -3770,6 +3913,21 @@ export default function Whiteboard({
               </svg>
             </button>
           </div>
+          <button
+            type="button"
+            className="mt-3 w-full rounded-lg border border-cq-border bg-cq-surface-soft py-2 text-[11px] font-medium text-cq-text hover:border-cq-accent-soft"
+            onClick={() => {
+              const s = selectedImageForPanel;
+              if (!s?.groupId || !s.dataUrl) return;
+              setImageCropModal({
+                groupId: s.groupId,
+                sourceDataUrl: s.cropSourceDataUrl || s.dataUrl,
+                initialCropRect: s.cropRectOnSource || null,
+              });
+            }}
+          >
+            Crop image…
+          </button>
           <label className="mt-3 flex flex-col gap-1">
             <span className="text-[10px] font-medium uppercase tracking-wider text-cq-faint">
               Move image to page
@@ -3799,6 +3957,19 @@ export default function Whiteboard({
           </label>
         </div>
       )}
+
+      {imageCropModal ? (
+        <ImageCropModal
+          open
+          sourceDataUrl={imageCropModal.sourceDataUrl}
+          initialCropRect={imageCropModal.initialCropRect}
+          onCancel={() => setImageCropModal(null)}
+          onApply={(payload) => {
+            applyImageCropReplace(imageCropModal.groupId, payload);
+            setImageCropModal(null);
+          }}
+        />
+      ) : null}
 
       {exportScopeModal && (
         <div

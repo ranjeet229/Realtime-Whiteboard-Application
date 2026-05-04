@@ -440,6 +440,87 @@ function setupWhiteboardSocket(io) {
       });
     });
 
+    socket.on("replace_image_group", (payload) => {
+      if (!socket.data.collab.canDraw) return;
+      const groupId = payload?.groupId;
+      if (!groupId || typeof groupId !== "string") return;
+      const dataUrl = payload?.dataUrl;
+      if (typeof dataUrl !== "string" || dataUrl.length > MAX_IMAGE_DATA_URL_CHARS) {
+        return;
+      }
+      const nw = Number(payload?.naturalWidth);
+      const nh = Number(payload?.naturalHeight);
+      const fx = Number(payload?.fromX);
+      const fy = Number(payload?.fromY);
+      const tx = Number(payload?.toX);
+      const ty = Number(payload?.toY);
+      if (!Number.isFinite(nw) || !Number.isFinite(nh) || nw < 1 || nh < 1 || nw > 32000 || nh > 32000) {
+        return;
+      }
+      if (![fx, fy, tx, ty].every(Number.isFinite)) return;
+      const sc =
+        typeof payload?.imageScale === "number" && Number.isFinite(payload.imageScale)
+          ? Math.max(0.02, Math.min(80, payload.imageScale))
+          : undefined;
+      const cr = payload?.cropRectOnSource;
+      const crx = cr && Number(cr.x);
+      const cry = cr && Number(cr.y);
+      const crw = cr && Number(cr.w);
+      const crh = cr && Number(cr.h);
+      const cropRectOk =
+        cr &&
+        [crx, cry, crw, crh].every(Number.isFinite) &&
+        crw >= 1 &&
+        crh >= 1 &&
+        crw <= 32000 &&
+        crh <= 32000;
+      const rawCropSrc = payload?.cropSourceDataUrl;
+      if (
+        typeof rawCropSrc === "string" &&
+        rawCropSrc.length > MAX_IMAGE_DATA_URL_CHARS
+      ) {
+        return;
+      }
+      const cropSource =
+        typeof rawCropSrc === "string" && rawCropSrc.length > 0 ? rawCropSrc : null;
+      let changed = false;
+      for (const evt of bucket.history) {
+        if (evt.groupId === groupId && evt.type === "image") {
+          evt.dataUrl = dataUrl;
+          evt.naturalWidth = nw;
+          evt.naturalHeight = nh;
+          evt.fromX = fx;
+          evt.fromY = fy;
+          evt.toX = tx;
+          evt.toY = ty;
+          if (sc !== undefined) evt.imageScale = sc;
+          if (cropSource) evt.cropSourceDataUrl = cropSource;
+          if (cropRectOk) {
+            evt.cropRectOnSource = { x: crx, y: cry, w: crw, h: crh };
+          }
+          changed = true;
+        }
+      }
+      if (!changed) return;
+      schedulePersist(roomId);
+      const broadcast = {
+        groupId,
+        dataUrl,
+        naturalWidth: nw,
+        naturalHeight: nh,
+        fromX: fx,
+        fromY: fy,
+        toX: tx,
+        toY: ty,
+        imageScale: sc,
+      };
+      if (cropSource) broadcast.cropSourceDataUrl = cropSource;
+      if (cropRectOk) {
+        broadcast.cropRectOnSource = { x: crx, y: cry, w: crw, h: crh };
+      }
+      socket.to(roomId).emit("image_group_replaced", broadcast);
+    });
+
     function applyMoveGroups(groupIds, dx, dy) {
       const idSet = new Set(
         (Array.isArray(groupIds) ? groupIds : [])
