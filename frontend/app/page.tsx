@@ -27,6 +27,11 @@ export default function LandingPage() {
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [nameFieldError]);
 
+  // Warm the whiteboard chunk so canvas opens faster after create/join.
+  useEffect(() => {
+    void import("../components/Whiteboard");
+  }, []);
+
   const createRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     setMsg("");
@@ -60,10 +65,11 @@ export default function LandingPage() {
           displayName: trimmed,
         })
       );
-      router.push(`/room/${data.roomId}`);
+      // Keep busy=true until this page unmounts — resetting in finally caused a
+      // brief flash back to "Create room" while the room route was still loading.
+      router.replace(`/room/${data.roomId}`);
     } catch (err: unknown) {
       setMsg(err instanceof Error ? err.message : "Error");
-    } finally {
       setBusy(false);
     }
   };

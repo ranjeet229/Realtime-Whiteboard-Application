@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import io from "socket.io-client";
 import Link from "next/link";
 import { ThemeToggleButton } from "./ThemeToggleButton";
+import AskAgentSidebar, { IconAskAgentNav } from "./AskAgentSidebar";
 import ImageCropModal from "./ImageCropModal";
 import { IconSidebarClosed, IconSidebarOpen } from "./SidebarPanelIcons";
 import {
@@ -1231,6 +1232,8 @@ export default function Whiteboard({
   const [sidebarOpen, setSidebarOpen] = useState(true);
   /** Right “People” rail (does not cover tools sidebar) */
   const [peopleOpen, setPeopleOpen] = useState(false);
+  /** Right “Ask agent” rail (local Ollama) */
+  const [agentOpen, setAgentOpen] = useState(false);
   const [mySocketId, setMySocketId] = useState(null);
   const [copyIdCopied, setCopyIdCopied] = useState(false);
   const [copyLinkCopied, setCopyLinkCopied] = useState(false);
@@ -1288,6 +1291,18 @@ export default function Whiteboard({
   useEffect(() => {
     canvasPagesRef.current = canvasPages;
   }, [canvasPages]);
+
+  useEffect(() => {
+    const html = document.documentElement;
+    const prevHtml = html.style.overflow;
+    const prevBody = document.body.style.overflow;
+    html.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = prevHtml;
+      document.body.style.overflow = prevBody;
+    };
+  }, []);
   useEffect(() => {
     activePageIdRef.current = activePageId;
   }, [activePageId]);
@@ -1746,13 +1761,15 @@ export default function Whiteboard({
   }, [roomId, roomToken, redrawCanvas]);
 
   useEffect(() => {
-    if (!peopleOpen) return undefined;
+    if (!peopleOpen && !agentOpen) return undefined;
     const onKey = (e) => {
-      if (e.key === "Escape") setPeopleOpen(false);
+      if (e.key !== "Escape") return;
+      if (agentOpen) setAgentOpen(false);
+      if (peopleOpen) setPeopleOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [peopleOpen]);
+  }, [peopleOpen, agentOpen]);
 
   useEffect(() => {
     if (!drawPermission) setExtraColorMenuOpen(false);
@@ -3222,7 +3239,32 @@ export default function Whiteboard({
           <ThemeToggleButton />
           <button
             type="button"
-            onClick={() => setPeopleOpen((o) => !o)}
+            onClick={() => {
+              setAgentOpen((open) => {
+                const next = !open;
+                if (next) setPeopleOpen(false);
+                return next;
+              });
+            }}
+            title="Ask agent (local Ollama)"
+            aria-label="Ask agent"
+            aria-expanded={agentOpen}
+            className={`cq-btn-ghost cq-transition inline-flex min-w-0 items-center gap-1.5 px-2 ${
+              agentOpen ? "border-cq-accent text-[var(--cq-selected-text)]" : ""
+            }`}
+          >
+            <IconAskAgentNav className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Ask agent</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPeopleOpen((open) => {
+                const next = !open;
+                if (next) setAgentOpen(false);
+                return next;
+              });
+            }}
             title="People"
             aria-label="People in room"
             aria-expanded={peopleOpen}
@@ -3240,7 +3282,7 @@ export default function Whiteboard({
         </div>
       </header>
 
-      <div className="flex flex-1 min-h-0">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {!sidebarOpen && (
           <div className="cq-toolbar-rail z-20 flex w-12 shrink-0 flex-col items-center border-r border-cq-border-subtle pt-3">
             <button
@@ -3568,7 +3610,7 @@ export default function Whiteboard({
         </aside>
 
         {/* Canvas + People (right panel sits beside canvas, not over tools) */}
-        <div className="flex min-h-0 min-w-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col p-2 md:p-3">
             <div
               ref={canvasAreaRef}
@@ -3707,6 +3749,15 @@ export default function Whiteboard({
               </div>
             </div>
           </div>
+
+          {agentOpen && (
+            <AskAgentSidebar
+              roomId={roomId}
+              displayName={displayName}
+              role={role}
+              onClose={() => setAgentOpen(false)}
+            />
+          )}
 
           {peopleOpen && (
             <aside

@@ -13,6 +13,7 @@ if (!process.env.JWT_SECRET) {
 
 const { connectDb } = require("./config/db");
 const roomRoutes = require("./routes/roomRoutes");
+const agentRoutes = require("./routes/agentRoutes");
 const { setupWhiteboardSocket } = require("./socket/whiteboardSocket");
 
 const app = express();
@@ -87,6 +88,7 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 app.use("/api/rooms", roomRoutes);
+app.use("/api/agent", agentRoutes);
 
 app.get("/health", (req, res) => {
   const state = mongoose.connection.readyState;

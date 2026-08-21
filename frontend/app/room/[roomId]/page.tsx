@@ -6,6 +6,20 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../../../lib/api";
 
+type Session = { roomToken: string; role: string; displayName: string };
+
+function sessionKey(roomId: string) {
+  return `cq_room_${roomId}`;
+}
+
+function RoomLoading() {
+  return (
+    <div className="cq-shell flex min-h-screen items-center justify-center">
+      <div className="h-10 w-10 animate-spin rounded-full border-2 border-cq-accent border-t-transparent" />
+    </div>
+  );
+}
+
 const Whiteboard = dynamic(
   () =>
     import("../../../components/Whiteboard").then((m) => {
@@ -25,24 +39,15 @@ const Whiteboard = dynamic(
     }),
   {
     ssr: false,
-    loading: () => (
-      <div className="cq-shell flex min-h-screen items-center justify-center">
-        <div className="h-10 w-10 animate-spin rounded-full border-2 border-cq-accent border-t-transparent" />
-      </div>
-    ),
+    loading: () => <RoomLoading />,
   }
 );
-
-type Session = { roomToken: string; role: string; displayName: string };
-
-function sessionKey(roomId: string) {
-  return `cq_room_${roomId}`;
-}
 
 export default function RoomPage() {
   const params = useParams();
   const roomId = params?.roomId as string;
   const [session, setSession] = useState<Session | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
   const [gateError, setGateError] = useState("");
   const [busy, setBusy] = useState(false);
   const [password, setPassword] = useState("");
@@ -57,6 +62,7 @@ export default function RoomPage() {
     } catch {
       /* ignore */
     }
+    setSessionReady(true);
   }, [roomId]);
 
   const persistSession = useCallback(
@@ -104,6 +110,10 @@ export default function RoomPage() {
   };
 
   if (!roomId) return null;
+
+  if (!sessionReady) {
+    return <RoomLoading />;
+  }
 
   if (!session) {
     return (

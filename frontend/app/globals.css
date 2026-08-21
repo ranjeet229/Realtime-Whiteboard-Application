@@ -208,6 +208,9 @@ body::-webkit-scrollbar {
 
 .cq-shell {
   min-height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
   color: var(--cq-text-primary);
 }
 
@@ -467,4 +470,64 @@ body::-webkit-scrollbar {
 
 .cq-toolbar-rail {
   background: var(--cq-toolbar-bg);
+}
+
+/* Ask Agent sidebar — single-row composer, internal scroll only */
+.cq-agent-sidebar {
+  max-height: 100%;
+}
+
+.cq-agent-messages {
+  overflow-x: hidden;
+}
+
+.cq-agent-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.35rem 0.35rem 0.35rem 0.85rem;
+  border-radius: 9999px;
+  border: 1px solid var(--cq-border);
+  background: var(--cq-card-bg-solid);
+  box-shadow: var(--cq-input-shadow);
+}
+
+.cq-agent-composer-row:focus-within {
+  border-color: var(--cq-accent-soft);
+  box-shadow: 0 0 0 3px var(--cq-accent-ring), var(--cq-input-shadow, 0 0 #0000);
+}
+
+.cq-agent-input {
+  line-height: 1.4;
+}
+
+.cq-agent-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: none;
+  border-radius: 0.65rem;
+  color: var(--cq-on-accent);
+  background: linear-gradient(
+    135deg,
+    var(--cq-accent) 0%,
+    var(--cq-primary-gradient-end) 100%
+  );
+  box-shadow: var(--cq-shadow-sm);
+}
+
+.cq-agent-send:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.cq-agent-history {
+  overflow-x: hidden;
+}
+
+.cq-agent-history-item {
+  cursor: pointer;
 }
