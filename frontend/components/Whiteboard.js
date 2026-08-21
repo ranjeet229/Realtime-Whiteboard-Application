@@ -218,6 +218,36 @@ function collectGroupIdsInFreehandLasso(strokes, points) {
   return out;
 }
 
+/** Denser samples so freehand lasso follows the cursor smoothly (pen-like). */
+function appendFreehandLassoPoints(points, pos) {
+  const next = points.slice();
+  const last = next[next.length - 1];
+  if (!last) return [{ x: pos.x, y: pos.y }];
+  const dx = pos.x - last.x;
+  const dy = pos.y - last.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 0.35) return next;
+  const step = 1.25;
+  if (dist > step) {
+    const n = Math.ceil(dist / step);
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      next.push({ x: last.x + dx * t, y: last.y + dy * t });
+    }
+  } else {
+    next.push({ x: pos.x, y: pos.y });
+  }
+  return next;
+}
+
+function closeLassoPointsForSelection(points) {
+  if (!points || points.length < 3) return points;
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (Math.hypot(first.x - last.x, first.y - last.y) < 1.5) return points;
+  return [...points, { x: first.x, y: first.y }];
+}
+
 function effectivePenWidth(penStyle, size) {
   const s = Number(size) || 3;
   if (penStyle === "highlighter") return Math.max(12, s * 2.4);
@@ -1394,6 +1424,7 @@ export default function Whiteboard({
 }) {
   const canvasRef = useRef(null);
   const laserCanvasRef = useRef(null);
+  const lassoCanvasRef = useRef(null);
   const canvasAreaRef = useRef(null);
   const [socket, setSocket] = useState(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -1411,7 +1442,8 @@ export default function Whiteboard({
   /** Dropdown popup: ink | laser | lasso (closes after picking an option). */
   const [toolPopup, setToolPopup] = useState(null);
   const drawWellRef = useRef(null);
-  const [lassoPath, setLassoPath] = useState(null);
+  /** True while freehand lasso stroke is in progress (smooth canvas overlay). */
+  const [lassoDrawing, setLassoDrawing] = useState(false);
   const laserStrokesRef = useRef(new Map());
   const laserAnimRef = useRef(0);
   const activeLaserIdRef = useRef(null);
@@ -1549,7 +1581,7 @@ export default function Whiteboard({
     if (!isSelectionTool(currentTool)) {
       setMoveSelection([]);
       setMarqueeRect(null);
-      setLassoPath(null);
+      setLassoDrawing(false);
       setMoveDragPreview(null);
       moveSessionRef.current = null;
       setMoveDragging(false);
@@ -1630,18 +1662,6 @@ export default function Whiteboard({
     });
   }, []);
 
-  /** Host revoked draw — cancel in-progress stroke and restore canvas from synced history. */
-  useEffect(() => {
-    if (drawPermission) return;
-    setIsDrawing(false);
-    setShapeStart(null);
-    setTextComposer(null);
-    activeLaserIdRef.current = null;
-    activePenGroupRef.current = null;
-    freestyleMovedRef.current = false;
-    redrawCanvas(historyRef.current);
-  }, [drawPermission, redrawCanvas]);
-
   const paintLaserOverlay = useCallback(() => {
     const canvas = laserCanvasRef.current;
     if (!canvas) return;
@@ -1682,6 +1702,51 @@ export default function Whiteboard({
       }
     }
   }, []);
+
+  const paintLassoOverlay = useCallback((points) => {
+    const canvas = lassoCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!points || points.length < 2) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const accent =
+      typeof window !== "undefined"
+        ? getComputedStyle(document.documentElement)
+            .getPropertyValue("--cq-accent")
+            .trim() || "#6366f1"
+        : "#6366f1";
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.stroke();
+    ctx.restore();
+  }, []);
+
+  /** Host revoked draw — cancel in-progress stroke and restore canvas from synced history. */
+  useEffect(() => {
+    if (drawPermission) return;
+    setIsDrawing(false);
+    setShapeStart(null);
+    setTextComposer(null);
+    activeLaserIdRef.current = null;
+    activePenGroupRef.current = null;
+    freestyleMovedRef.current = false;
+    setLassoDrawing(false);
+    paintLassoOverlay(null);
+    redrawCanvas(historyRef.current);
+  }, [drawPermission, redrawCanvas, paintLassoOverlay]);
 
   const ensureLaserAnimLoop = useCallback(() => {
     if (laserAnimRef.current) return;
@@ -2291,6 +2356,11 @@ export default function Whiteboard({
         laser.width = w * dpr;
         laser.height = h * dpr;
       }
+      const lasso = lassoCanvasRef.current;
+      if (lasso) {
+        lasso.width = w * dpr;
+        lasso.height = h * dpr;
+      }
       redrawCanvas(historyRef.current);
       paintLaserOverlay();
     }
@@ -2307,7 +2377,7 @@ export default function Whiteboard({
         laserAnimRef.current = 0;
       }
     };
-  }, [redrawCanvas, paintLaserOverlay]);
+  }, [redrawCanvas, paintLaserOverlay, paintLassoOverlay]);
 
   const getCanvasPos = (e) => {
     const canvas = canvasRef.current;
@@ -2350,10 +2420,12 @@ export default function Whiteboard({
       setMoveDragPreview(null);
       if (currentTool === "lasso" && lassoModeRef.current === "freehand") {
         setMarqueeRect(null);
-        setLassoPath([{ x: pos.x, y: pos.y }]);
+        const startPts = [{ x: pos.x, y: pos.y }];
+        setLassoDrawing(true);
+        paintLassoOverlay(startPts);
         moveSessionRef.current = {
           phase: "freehand-lasso",
-          points: [{ x: pos.x, y: pos.y }],
+          points: startPts,
           captured: false,
         };
         try {
@@ -2363,7 +2435,8 @@ export default function Whiteboard({
         }
         return;
       }
-      setLassoPath(null);
+      setLassoDrawing(false);
+      paintLassoOverlay(null);
       setMarqueeRect({ x: pos.x, y: pos.y, w: 0, h: 0 });
       moveSessionRef.current = {
         phase: "marquee",
@@ -2538,11 +2611,11 @@ export default function Whiteboard({
     if (!canvas) return;
     e.preventDefault();
     const pos = getCanvasPos(e);
-    const last = sess.points[sess.points.length - 1];
-    if (last && Math.hypot(pos.x - last.x, pos.y - last.y) < 1.5) return;
-    sess.points.push({ x: pos.x, y: pos.y });
+    const prevLen = sess.points.length;
+    sess.points = appendFreehandLassoPoints(sess.points, pos);
+    if (sess.points.length === prevLen) return;
     sess.captured = true;
-    setLassoPath([...sess.points]);
+    paintLassoOverlay(sess.points);
   };
 
   const tryFreehandLassoPointerUp = (e) => {
@@ -2559,17 +2632,19 @@ export default function Whiteboard({
     }
     moveSessionRef.current = null;
     const points = sess.points || [];
-    setLassoPath(null);
+    paintLassoOverlay(null);
+    setLassoDrawing(false);
     if (points.length < 3) {
       if (!e.shiftKey) setMoveSelection([]);
       return;
     }
+    const closed = closeLassoPointsForSelection(points);
     const visible = strokesVisibleOnPage(
       historyRef.current,
       activePageIdRef.current,
       canvasPagesRef.current
     );
-    const ids = collectGroupIdsInFreehandLasso(visible, points);
+    const ids = collectGroupIdsInFreehandLasso(visible, closed);
     if (e.shiftKey) {
       setMoveSelection((prev) => [...new Set([...prev, ...ids])]);
     } else {
@@ -2724,7 +2799,8 @@ export default function Whiteboard({
     if (ms?.phase === "marquee") {
       moveSessionRef.current = null;
       setMarqueeRect(null);
-      setLassoPath(null);
+      setLassoDrawing(false);
+      paintLassoOverlay(null);
       setMoveDragPreview(null);
       return;
     }
@@ -4426,23 +4502,6 @@ export default function Whiteboard({
               className="cq-canvas-frame relative min-h-[280px] flex-1 overflow-hidden"
             >
               {isSelectionTool(currentTool) &&
-                lassoPath != null &&
-                lassoPath.length > 1 && (
-                  <svg
-                    className="pointer-events-none absolute inset-0 z-[5] h-full w-full overflow-visible"
-                    aria-hidden
-                  >
-                    <polygon
-                      points={lassoPath.map((p) => `${p.x},${p.y}`).join(" ")}
-                      fill="color-mix(in srgb, var(--cq-accent) 14%, transparent)"
-                      stroke="var(--cq-accent)"
-                      strokeWidth="2"
-                      strokeDasharray="6 4"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                )}
-              {isSelectionTool(currentTool) &&
                 marqueeRect != null &&
                 (marqueeRect.w > 0.5 || marqueeRect.h > 0.5) && (
                   <div
@@ -4489,7 +4548,7 @@ export default function Whiteboard({
                     : isSelectionTool(currentTool)
                     ? moveDragging
                       ? "cursor-grabbing"
-                      : marqueeRect != null || lassoPath != null
+                      : marqueeRect != null || lassoDrawing
                       ? "cursor-crosshair"
                       : "cursor-grab"
                     : currentTool === "text"
@@ -4513,6 +4572,11 @@ export default function Whiteboard({
                 }}
               />
 
+              <canvas
+                ref={lassoCanvasRef}
+                className="pointer-events-none absolute inset-0 z-[5] block h-full w-full"
+                aria-hidden
+              />
               <canvas
                 ref={laserCanvasRef}
                 className="pointer-events-none absolute inset-0 z-[4] block h-full w-full"
