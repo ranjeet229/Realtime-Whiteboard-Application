@@ -1533,10 +1533,6 @@ export default function Whiteboard({
   }, [history]);
 
   useEffect(() => {
-    setDrawPermission(canDraw);
-  }, [drawPermission]);
-
-  useEffect(() => {
     const p = parseRoomJwtPayload(roomToken);
     const key =
       (p?.userId != null && String(p.userId)) ||
@@ -1633,6 +1629,18 @@ export default function Whiteboard({
       drawOnCanvas(ctx, evt);
     });
   }, []);
+
+  /** Host revoked draw — cancel in-progress stroke and restore canvas from synced history. */
+  useEffect(() => {
+    if (drawPermission) return;
+    setIsDrawing(false);
+    setShapeStart(null);
+    setTextComposer(null);
+    activeLaserIdRef.current = null;
+    activePenGroupRef.current = null;
+    freestyleMovedRef.current = false;
+    redrawCanvas(historyRef.current);
+  }, [drawPermission, redrawCanvas]);
 
   const paintLaserOverlay = useCallback(() => {
     const canvas = laserCanvasRef.current;
@@ -2940,6 +2948,14 @@ export default function Whiteboard({
   const stopDrawing = (e) => {
     if (!isDrawing) return;
     e.preventDefault();
+    if (!drawPermission) {
+      setIsDrawing(false);
+      setShapeStart(null);
+      activeLaserIdRef.current = null;
+      activePenGroupRef.current = null;
+      redrawCanvas(historyRef.current);
+      return;
+    }
     setIsDrawing(false);
     const pos = getCanvasPos(e);
 

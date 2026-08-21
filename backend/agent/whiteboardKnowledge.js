@@ -208,7 +208,7 @@ Shortcuts are ignored while typing in inputs (text box, Ask agent, etc.).
 - All draw/erase/shape/text/image/move/delete events broadcast via Socket.IO to the room.
 - **Live cursors** — colored dot + name label for each participant.
 - **Undo/redo** — per-user; server stores redo stacks; concurrent edits use full resync when needed.
-- **Draw permission** — host can temporarily disable an editor (not viewers) from drawing.
+- **Draw permission** — host can temporarily disable an editor (not viewers) from drawing. When off, that user **cannot draw, erase, type, or edit** anything new; their existing strokes may be hidden from others; the server rejects all edit events.
 
 ### Persistence
 - Stroke history saved to MongoDB (debounced). Rejoining reloads the board.
