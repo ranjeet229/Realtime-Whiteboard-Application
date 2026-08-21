@@ -36,8 +36,8 @@ CanvasQuill is a multi-user drawing whiteboard. Users join a **room** (unique UR
 
 | Region | Purpose |
 |--------|---------|
-| **Top navbar** | Home, room ID, online count, Copy ID/Link, Pages, Add image, Download, Undo/Redo, Clear (host), theme, **Ask agent**, People |
-| **Left Tools sidebar** | Pen, eraser, move, text, shapes, colors, brush size, fill/outline. Collapse with ×; reopen via Tools rail |
+| **Top navbar** | Home, room ID, online count, Copy ID/Link, Pages, Add image, Download, Undo/Redo, Clear (host), theme, People *(Ask agent hidden in UI — can be re-enabled)* |
+| **Left Tools sidebar** | Pen (ink popup: fountain pen, highlighter, tape), eraser, laser pointer, lasso, text, shapes, colors, brush size, fill/outline. Laser and Lasso open sub-option popups. Collapse with ×; reopen via Tools rail |
 | **Center canvas** | Main drawing area; shows live peer cursors with names |
 | **Ask agent panel** | Right sidebar — chat with local Ollama assistant; **New session** clears chat |
 | **People panel** | Right sidebar — who is in the room; host controls editor draw access |
@@ -48,25 +48,49 @@ Page indicator bottom-left: **Page N / total** (multi-slide decks).
 
 ## Drawing tools (left sidebar → Draw)
 
-### Pen
-- Freehand strokes in the selected **color** and **size** (1–70px slider).
+### Laser pointer
+- Temporary glowing trail for presenting (Dot or Line mode).
+- Strokes fade and disappear after about **1 second**.
+- **Not saved** to the board history or exports; visible live to everyone in the room.
+- Tap the laser tool to open a **popup** with Dot / Line; the popup closes after you choose.
+- Pick color/size like the pen; Line mode draws a trail, Dot mode shows a glowing point.
+- **Shortcut:** K
+
+### Ink tools (single Pen button → popup)
+- One **Pen** icon in the Draw row. Tap it to open the **Ink** popup: Fountain pen, Highlighter, or Tape.
+- Pick one to activate it; the popup closes after selection.
+- The Pen button always shows the **fountain pen** icon; a **red badge** (P / H / T) shows which ink variant is active.
+
+### Fountain pen
+- Smooth freehand ink in the selected **color** and **size** (1–70px slider).
 - Click-drag on canvas. Strokes sync to all editors in the room.
 - **Shortcut:** P
+
+### Highlighter
+- Wide semi-transparent marker strokes (multiply blend).
+- Defaults to yellow; good for emphasizing content without hiding it.
+- **Shortcut:** H
+
+### Tape
+- Opaque masking strips that cover ink underneath (like sticky tape).
+- Defaults to pale yellow; draw over content to hide it.
+- **Shortcut:** Y
 
 ### Eraser
 - Freehand erase using destination-out (paints transparency / removes ink).
 - Uses **eraser size** slider (same Size control when eraser is active).
 - **Shortcut:** E
 
-### Move
+### Lasso (selection)
 - Select, move, and delete objects (grouped strokes).
+- Tap the lasso tool to open a **popup**: **Freehand** (draw a loop around items) or **Rectangle** (marquee box).
 - **Click** an object to select it (dotted outline).
 - **Shift+click** toggles multi-select.
-- **Drag empty area** draws a marquee rectangle to select multiple items.
+- **Drag empty area** with Freehand draws a dashed loop; with Rectangle draws a marquee.
 - **Drag selected** items to reposition (synced to collaborators).
-- **Delete** or **Backspace** removes selected objects (Move tool active).
-- Trash icon appears in toolbar when selection exists.
+- **Delete** or **Backspace** removes selected objects (Lasso tool active).
 - **Shortcut:** V
+- Trash icon appears in toolbar when selection exists.
 
 ### Text
 - Click canvas → inline text box appears.
@@ -154,7 +178,7 @@ All shapes use the current **color** and **size** (stroke width).
 |------|--------|
 | P | Pen |
 | E | Eraser |
-| V | Move |
+| V | Lasso (select / move) |
 | I | Text |
 | L | Line |
 | R | Rectangle |
@@ -167,7 +191,7 @@ All shapes use the current **color** and **size** (stroke width).
 | 8 | Star |
 | Ctrl/Cmd+Z | Undo |
 | Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y | Redo |
-| Delete / Backspace | Delete selection (Move tool, with selection) |
+| Delete / Backspace | Delete selection (Lasso tool, with selection) |
 
 Shortcuts are ignored while typing in inputs (text box, Ask agent, etc.).
 
@@ -184,7 +208,7 @@ Shortcuts are ignored while typing in inputs (text box, Ask agent, etc.).
 - All draw/erase/shape/text/image/move/delete events broadcast via Socket.IO to the room.
 - **Live cursors** — colored dot + name label for each participant.
 - **Undo/redo** — per-user; server stores redo stacks; concurrent edits use full resync when needed.
-- **Draw permission** — host can temporarily disable an editor (not viewers) from drawing.
+- **Draw permission** — host can temporarily disable an editor (not viewers) from drawing. When off, that user **cannot draw, erase, type, or edit** anything new; their existing strokes may be hidden from others; the server rejects all edit events.
 
 ### Persistence
 - Stroke history saved to MongoDB (debounced). Rejoining reloads the board.

@@ -1,21 +1,121 @@
 /** Compact SVG icons for the whiteboard tool rail (light + dark via currentColor). */
 
-export function IconPen({ className = "w-4 h-4" }) {
+/** Fountain pen — rounded capsule body, pointed nib (outline only) */
+export function IconPen({ className = "w-5 h-5" }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M14.5 3.5l6 6L8 22H3v-5L14.5 3.5z" />
-      <path d="M12.5 5.5l6 6" opacity="0.85" />
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M6.5 19.8 8.5 17.5 15.5 4.5Q16.5 3 18 3.8Q19.5 4.6 18.8 6.2L12.5 15.5 6.5 19.8Z" />
     </svg>
   );
 }
 
-/** Lucide-style eraser (rubber + edge) — reads as eraser at small sizes */
-export function IconEraser({ className = "w-4 h-4" }) {
+/** Wide translucent marker stroke */
+export function IconHighlighter({ className = "w-4 h-4" }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 18l8-8 4 4-8 8H4v-4z" fill="currentColor" fillOpacity="0.35" />
+      <path d="M12 10l2-2 3 3-2 2" />
+      <path d="M15 7l2-2" />
+    </svg>
+  );
+}
+
+/** Masking tape strip */
+export function IconTape({ className = "w-4 h-4" }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="3" y="9" width="18" height="6" rx="1" fill="currentColor" fillOpacity="0.25" />
+      <path d="M3 12h18" strokeDasharray="2 2" opacity="0.6" />
+      <path d="M7 9V7M12 9V7M17 9V7" opacity="0.5" />
+    </svg>
+  );
+}
+
+/** Handheld laser pointer with beam tip */
+export function IconLaser({ className = "w-5 h-5" }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4.5 19.5l6.2-6.2" />
+      <path d="M9.2 14.8l1.6 1.6c.4.4 1 .4 1.4 0l1.2-1.2c.4-.4.4-1 0-1.4L12 12.2" />
+      <path d="M10.8 11l2.2-2.2" />
+      <circle cx="17.2" cy="6.8" r="1.35" fill="#ef4444" stroke="#ef4444" strokeWidth="0.5" />
+      <path d="M14.2 8.2l1.6-1.6" stroke="#ef4444" strokeWidth="1.5" />
+      <path d="M18.4 5.6l1.3-1.3M19.1 7.8l1.5.2M16.5 5l-.2-1.5" stroke="#ef4444" strokeWidth="1.25" opacity="0.85" />
+    </svg>
+  );
+}
+
+/** Lucide-style eraser (rubber + edge) */
+export function IconEraser({ className = "w-5 h-5" }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l2.6 2.6c1 1 1 2.5 0 3.4L13 21" />
       <path d="M22 21H7" />
       <path d="m10 10 2 2" />
+    </svg>
+  );
+}
+
+/** Laser dot mode preview (popup) */
+export function IconLaserDotPreview({ className = "h-3 w-3" }) {
+  return (
+    <span
+      className={`inline-block rounded-full bg-red-500 shadow-[0_0_8px_2px_rgba(239,68,68,0.85)] ${className}`}
+      aria-hidden
+    />
+  );
+}
+
+/** Laser line mode preview — thin dotted red trail */
+export function IconLaserLinePreview({ className = "h-4 w-10" }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 40 10"
+      fill="none"
+      aria-hidden
+    >
+      <line
+        x1="2"
+        y1="5"
+        x2="38"
+        y2="5"
+        stroke="#ef4444"
+        strokeWidth="4"
+        strokeDasharray="3 3"
+        strokeLinecap="round"
+        opacity="0.25"
+      />
+      <line
+        x1="2"
+        y1="5"
+        x2="38"
+        y2="5"
+        stroke="#ef4444"
+        strokeWidth="1.25"
+        strokeDasharray="3 3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** Freehand lasso selection — dashed loop */
+export function IconLasso({ className = "w-5 h-5" }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M8.5 6.5c-2.5 1-4 3.2-4 5.8 0 3.9 3.1 7 7 7 2.2 0 4.1-1 5.3-2.6" strokeDasharray="3 2.5" />
+      <path d="M15.8 16.7c1.8-1.2 3.2-3.2 3.2-5.7 0-4.4-3.6-8-8-8-1.8 0-3.5.6-4.8 1.6" strokeDasharray="3 2.5" />
+      <path d="M17 4l1.5 1.5M19 6l1.5-.5M18 3.5l.5 1.5" strokeWidth="1.5" opacity="0.75" />
     </svg>
   );
 }
@@ -174,7 +274,11 @@ export function IconDownload({ className = "w-4 h-4" }) {
 
 const ICONS = {
   pen: IconPen,
+  highlighter: IconHighlighter,
+  tape: IconTape,
   eraser: IconEraser,
+  laser: IconLaser,
+  lasso: IconLasso,
   move: IconMove,
   line: IconLine,
   rectangle: IconRect,

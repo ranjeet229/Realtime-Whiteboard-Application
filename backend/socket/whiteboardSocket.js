@@ -295,6 +295,19 @@ function setupWhiteboardSocket(io) {
     io.to(roomId).emit("user_count_update", countInRoom(io, roomId));
 
     // --- draw / erase (editors+host only) ---
+    // Temporary laser pointer — broadcast only, never persisted
+    socket.on("laser", (laserData) => {
+      if (!socket.data.collab?.canDraw) return;
+      if (!laserData || typeof laserData !== "object") return;
+      const strokeId = laserData.strokeId;
+      if (typeof strokeId !== "string" || !strokeId) return;
+      socket.to(roomId).emit("remote_laser", {
+        ...laserData,
+        socketId: socket.id,
+        userKey,
+      });
+    });
+
     socket.on("draw", (drawData) => {
       if (!socket.data.collab.canDraw) return;
       clearRedoForKey(bucket, userKey || socket.id);

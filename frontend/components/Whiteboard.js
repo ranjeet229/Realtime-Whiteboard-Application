@@ -16,6 +16,8 @@ import {
   IconUndo,
   IconRedo,
   IconDownload,
+  IconLaserDotPreview,
+  IconLaserLinePreview,
 } from "./WhiteboardToolIcons.jsx";
 
 const rawSocket =
@@ -23,6 +25,13 @@ const rawSocket =
   process.env.NEXT_PUBLIC_API_URL?.trim() ||
   "http://localhost:5000";
 const SOCKET_URL = rawSocket.replace(/\/+$/, "");
+
+/** Set `true` to restore Ask agent in the header and right panel. */
+const SHOW_ASK_AGENT = false;
+
+/** Draw toolbar sizing (sidebar Draw row) */
+const DRAW_TOOL_ICON_CLASS = "h-[18px] w-[18px] shrink-0";
+const DRAW_POPUP_ICON_CLASS = "h-[16px] w-[16px] shrink-0";
 
 /** Read room JWT payload (client) for stable userKey matching server collab. */
 function parseRoomJwtPayload(token) {
@@ -111,9 +120,14 @@ function buildTextStroke(text, color, fontSize, x, y, pageId) {
 
 /** Native `title` tooltips — one short label each */
 const TOOL_HINTS = {
-  pen: "Pen",
+  pen: "Fountain pen",
+  ink: "Pen — fountain pen, highlighter, tape",
+  highlighter: "Highlighter",
+  tape: "Tape — covers content",
   eraser: "Eraser",
+  laser: "Laser pointer — temporary trail",
   move: "Move",
+  lasso: "Lasso — select objects",
   text: "Text (keyboard I)",
   line: "Line",
   rectangle: "Rectangle",
@@ -125,6 +139,172 @@ const TOOL_HINTS = {
   roundRect: "Round rect",
   star: "Star",
 };
+
+/** Laser trail stays visible then fades (~1s total). */
+const LASER_HOLD_MS = 700;
+const LASER_FADE_MS = 300;
+const LASER_DEFAULT_COLOR = "#ef4444";
+
+/** Freehand ink tools (saved to board). */
+const FREESTYLE_PEN_TOOLS = new Set(["pen", "highlighter", "tape"]);
+
+function penStyleForTool(tool) {
+  if (tool === "highlighter") return "highlighter";
+  if (tool === "tape") return "tape";
+  return "fountain";
+}
+
+function isFreestylePenTool(tool) {
+  return FREESTYLE_PEN_TOOLS.has(tool);
+}
+
+function isSelectionTool(tool) {
+  return tool === "lasso" || tool === "move";
+}
+
+const INK_TOOL_VALUES = ["pen", "highlighter", "tape"];
+
+const INK_VARIANT_BADGE = {
+  pen: "P",
+  highlighter: "H",
+  tape: "T",
+};
+
+const INK_VARIANT_LABEL = {
+  pen: "Fountain pen",
+  highlighter: "Highlighter",
+  tape: "Tape",
+};
+
+function toolPopupKind(tool) {
+  if (tool === "ink") return "ink";
+  if (tool === "laser") return "laser";
+  if (tool === "lasso") return "lasso";
+  return null;
+}
+
+/** Ray-cast point-in-polygon for freehand lasso selection. */
+function pointInPolygon(x, y, points) {
+  if (!points || points.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const xi = points[i].x;
+    const yi = points[i].y;
+    const xj = points[j].x;
+    const yj = points[j].y;
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function collectGroupIdsInFreehandLasso(strokes, points) {
+  if (!points || points.length < 3) return [];
+  const seen = new Set();
+  const out = [];
+  for (let i = 0; i < strokes.length; i++) {
+    const evt = strokes[i];
+    if (!evt.groupId || seen.has(evt.groupId)) continue;
+    const eb = getEventHitBounds(evt);
+    if (!eb) continue;
+    const cx = (eb.minX + eb.maxX) / 2;
+    const cy = (eb.minY + eb.maxY) / 2;
+    if (pointInPolygon(cx, cy, points)) {
+      seen.add(evt.groupId);
+      out.push(evt.groupId);
+    }
+  }
+  return out;
+}
+
+function effectivePenWidth(penStyle, size) {
+  const s = Number(size) || 3;
+  if (penStyle === "highlighter") return Math.max(12, s * 2.4);
+  if (penStyle === "tape") return Math.max(16, s * 3);
+  return s;
+}
+
+function applyFreestylePenCtx(ctx, penStyle, color, size) {
+  const w = effectivePenWidth(penStyle, size);
+  ctx.lineCap = penStyle === "tape" ? "butt" : "round";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = w;
+  ctx.globalCompositeOperation =
+    penStyle === "highlighter" ? "multiply" : "source-over";
+  ctx.globalAlpha = penStyle === "highlighter" ? 0.42 : 1;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  return w;
+}
+
+function drawFreestyleInk(ctx, evt) {
+  const penStyle = evt.penStyle || "fountain";
+  ctx.save();
+  const w = applyFreestylePenCtx(ctx, penStyle, evt.color, evt.size);
+  const pin =
+    evt.dot === true ||
+    (Math.abs(evt.fromX - evt.toX) < 0.02 &&
+      Math.abs(evt.fromY - evt.toY) < 0.02);
+  if (pin) {
+    const r = Math.max(0.5, w / 2);
+    ctx.beginPath();
+    ctx.arc(evt.fromX, evt.fromY, r, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(evt.fromX, evt.fromY);
+    ctx.lineTo(evt.toX, evt.toY);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawLaserGlowStroke(ctx, fromX, fromY, toX, toY, color, size, alpha = 1) {
+  if (!ctx) return;
+  const w = Math.max(2, Number(size) || 4);
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.globalCompositeOperation = "source-over";
+  ctx.strokeStyle = color || LASER_DEFAULT_COLOR;
+  ctx.shadowColor = color || LASER_DEFAULT_COLOR;
+  ctx.shadowBlur = w * 3.2;
+  ctx.lineWidth = w * 1.65;
+  ctx.beginPath();
+  ctx.moveTo(fromX, fromY);
+  ctx.lineTo(toX, toY);
+  ctx.stroke();
+  ctx.shadowBlur = w * 1.1;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(1.2, w * 0.38);
+  ctx.beginPath();
+  ctx.moveTo(fromX, fromY);
+  ctx.lineTo(toX, toY);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawLaserGlowDot(ctx, x, y, color, size, alpha = 1) {
+  if (!ctx) return;
+  const r = Math.max(3, (Number(size) || 4) * 1.15);
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = color || LASER_DEFAULT_COLOR;
+  ctx.shadowColor = color || LASER_DEFAULT_COLOR;
+  ctx.shadowBlur = r * 3.5;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = r * 0.8;
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(x, y, Math.max(1.5, r * 0.35), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
 
 /** Full preset list; default quick row from `MAIN_COLOR_ORDER`, rest in “More colors”. */
 const ALL_COLOR_SWATCHES = [
@@ -1006,6 +1186,13 @@ function drawOnCanvas(ctx, evt) {
       break;
     }
     default: {
+      if (evt.type === "draw" || isFreestylePenTool(evt.type)) {
+        drawFreestyleInk(ctx, {
+          ...evt,
+          penStyle: evt.penStyle || penStyleForTool(evt.type),
+        });
+        break;
+      }
       ctx.globalCompositeOperation = "source-over";
       ctx.strokeStyle = evt.color;
       ctx.lineWidth = evt.size;
@@ -1206,15 +1393,45 @@ export default function Whiteboard({
   canDraw = true,
 }) {
   const canvasRef = useRef(null);
+  const laserCanvasRef = useRef(null);
   const canvasAreaRef = useRef(null);
   const [socket, setSocket] = useState(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentTool, setCurrentTool] = useState("pen");
   const currentToolRef = useRef("pen");
   currentToolRef.current = currentTool;
+  /** Laser mode: glowing temporary Dot or Line (fades after ~1s). */
+  const [laserMode, setLaserMode] = useState("line");
+  const laserModeRef = useRef("line");
+  laserModeRef.current = laserMode;
+  /** Lasso: freehand loop vs rectangular marquee. */
+  const [lassoMode, setLassoMode] = useState("freehand");
+  const lassoModeRef = useRef("freehand");
+  lassoModeRef.current = lassoMode;
+  /** Dropdown popup: ink | laser | lasso (closes after picking an option). */
+  const [toolPopup, setToolPopup] = useState(null);
+  const drawWellRef = useRef(null);
+  const [lassoPath, setLassoPath] = useState(null);
+  const laserStrokesRef = useRef(new Map());
+  const laserAnimRef = useRef(0);
+  const activeLaserIdRef = useRef(null);
   const [currentColor, setCurrentColor] = useState("#3b82f6");
   const [currentSize, setCurrentSize] = useState(3);
   const [eraserSize, setEraserSize] = useState(10);
+
+  useEffect(() => {
+    /* Tool-specific default colors */
+    if (currentTool === "laser" && currentColor === "#3b82f6") {
+      setCurrentColor(LASER_DEFAULT_COLOR);
+    }
+    if (currentTool === "highlighter" && currentColor === "#3b82f6") {
+      setCurrentColor("#fde047");
+    }
+    if (currentTool === "tape" && currentColor === "#3b82f6") {
+      setCurrentColor("#fef08a");
+    }
+  }, [currentTool]);
+
   /** Paint-style solid fill for closed shapes (rect, circle, …) */
   const [shapeFilled, setShapeFilled] = useState(true);
   const [userCount, setUserCount] = useState(1);
@@ -1316,10 +1533,6 @@ export default function Whiteboard({
   }, [history]);
 
   useEffect(() => {
-    setDrawPermission(canDraw);
-  }, [drawPermission]);
-
-  useEffect(() => {
     const p = parseRoomJwtPayload(roomToken);
     const key =
       (p?.userId != null && String(p.userId)) ||
@@ -1333,14 +1546,32 @@ export default function Whiteboard({
   }, [moveSelection]);
 
   useEffect(() => {
-    if (currentTool !== "move") {
+    if (!isSelectionTool(currentTool)) {
       setMoveSelection([]);
       setMarqueeRect(null);
+      setLassoPath(null);
       setMoveDragPreview(null);
       moveSessionRef.current = null;
       setMoveDragging(false);
     }
   }, [currentTool]);
+
+  useEffect(() => {
+    if (!toolPopup) return undefined;
+    const onDoc = (e) => {
+      const el = drawWellRef.current;
+      if (el && !el.contains(e.target)) setToolPopup(null);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setToolPopup(null);
+    };
+    document.addEventListener("pointerdown", onDoc, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDoc, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [toolPopup]);
 
   useEffect(() => {
     const t = copyFeedbackTimersRef.current;
@@ -1351,9 +1582,10 @@ export default function Whiteboard({
   }, []);
 
   const shapeOptions = [
-    { label: "Pen", value: "pen", group: "draw" },
+    { label: "Pen", value: "ink", group: "draw" },
     { label: "Eraser", value: "eraser", group: "draw" },
-    { label: "Move", value: "move", group: "draw" },
+    { label: "Laser", value: "laser", group: "draw" },
+    { label: "Lasso", value: "lasso", group: "draw" },
     { label: "Text", value: "text", group: "draw" },
     { label: "Line", value: "line", group: "shapes" },
     { label: "Rectangle", value: "rectangle", group: "shapes" },
@@ -1397,6 +1629,153 @@ export default function Whiteboard({
       drawOnCanvas(ctx, evt);
     });
   }, []);
+
+  /** Host revoked draw — cancel in-progress stroke and restore canvas from synced history. */
+  useEffect(() => {
+    if (drawPermission) return;
+    setIsDrawing(false);
+    setShapeStart(null);
+    setTextComposer(null);
+    activeLaserIdRef.current = null;
+    activePenGroupRef.current = null;
+    freestyleMovedRef.current = false;
+    redrawCanvas(historyRef.current);
+  }, [drawPermission, redrawCanvas]);
+
+  const paintLaserOverlay = useCallback(() => {
+    const canvas = laserCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const pageId =
+      activePageIdRef.current || canvasPagesRef.current[0]?.id || "";
+    const now = performance.now();
+    for (const stroke of laserStrokesRef.current.values()) {
+      if (stroke.pageId && pageId && stroke.pageId !== pageId) continue;
+      let alpha = 1;
+      if (typeof stroke.fadeAt === "number") {
+        const elapsed = now - stroke.fadeAt;
+        if (elapsed >= LASER_FADE_MS) continue;
+        if (elapsed > 0) alpha = 1 - elapsed / LASER_FADE_MS;
+      }
+      if (stroke.mode === "dot") {
+        const p = stroke.point;
+        if (p) drawLaserGlowDot(ctx, p.x, p.y, stroke.color, stroke.size, alpha);
+        continue;
+      }
+      const segs = stroke.segments || [];
+      for (const s of segs) {
+        drawLaserGlowStroke(
+          ctx,
+          s.fromX,
+          s.fromY,
+          s.toX,
+          s.toY,
+          stroke.color,
+          stroke.size,
+          alpha
+        );
+      }
+    }
+  }, []);
+
+  const ensureLaserAnimLoop = useCallback(() => {
+    if (laserAnimRef.current) return;
+    const tick = () => {
+      const now = performance.now();
+      let keep = false;
+      for (const [id, stroke] of laserStrokesRef.current) {
+        if (typeof stroke.fadeAt === "number") {
+          if (now - stroke.fadeAt >= LASER_FADE_MS) {
+            laserStrokesRef.current.delete(id);
+            continue;
+          }
+          keep = true;
+        } else if (stroke.live) {
+          keep = true;
+        }
+      }
+      paintLaserOverlay();
+      if (keep || laserStrokesRef.current.size > 0) {
+        laserAnimRef.current = requestAnimationFrame(tick);
+      } else {
+        laserAnimRef.current = 0;
+      }
+    };
+    laserAnimRef.current = requestAnimationFrame(tick);
+  }, [paintLaserOverlay]);
+
+  const upsertLaserStroke = useCallback(
+    (payload, { startFade = false } = {}) => {
+      if (!payload?.strokeId) return;
+      const map = laserStrokesRef.current;
+      let stroke = map.get(payload.strokeId);
+      if (!stroke) {
+        stroke = {
+          id: payload.strokeId,
+          mode: payload.mode === "dot" ? "dot" : "line",
+          color: payload.color || LASER_DEFAULT_COLOR,
+          size: payload.size || 4,
+          pageId: payload.pageId,
+          segments: [],
+          point: null,
+          live: true,
+          fadeAt: null,
+        };
+        map.set(payload.strokeId, stroke);
+      }
+      if (payload.color) stroke.color = payload.color;
+      if (payload.size != null) stroke.size = payload.size;
+      if (payload.pageId) stroke.pageId = payload.pageId;
+      if (payload.mode) stroke.mode = payload.mode === "dot" ? "dot" : "line";
+
+      if (stroke.mode === "dot") {
+        if (payload.toX != null && payload.toY != null) {
+          stroke.point = { x: payload.toX, y: payload.toY };
+        } else if (payload.fromX != null && payload.fromY != null) {
+          stroke.point = { x: payload.fromX, y: payload.fromY };
+        }
+      } else if (
+        payload.fromX != null &&
+        payload.fromY != null &&
+        payload.toX != null &&
+        payload.toY != null
+      ) {
+        stroke.segments.push({
+          fromX: payload.fromX,
+          fromY: payload.fromY,
+          toX: payload.toX,
+          toY: payload.toY,
+        });
+      }
+
+      if (startFade || payload.action === "end") {
+        stroke.live = false;
+        if (stroke.fadeAt == null) {
+          stroke.fadeAt = performance.now() + LASER_HOLD_MS;
+        }
+      }
+      ensureLaserAnimLoop();
+      paintLaserOverlay();
+    },
+    [ensureLaserAnimLoop, paintLaserOverlay]
+  );
+
+  const emitLaser = useCallback(
+    (data) => {
+      const s = socketRef.current;
+      if (s?.connected) s.emit("laser", data);
+    },
+    []
+  );
+
+  useEffect(() => {
+    paintLaserOverlay();
+  }, [activePageId, paintLaserOverlay]);
 
   const finalizeTextFromComposer = useCallback(() => {
     const prev = textComposerRef.current;
@@ -1715,6 +2094,11 @@ export default function Whiteboard({
       }
     });
 
+    newSocket.on("remote_laser", (data) => {
+      if (!data?.strokeId) return;
+      upsertLaserStroke(data, { startFade: data.action === "end" });
+    });
+
     newSocket.on("remote_erase", (data) => {
       setHistory((prev) => {
         const next = [...prev, data];
@@ -1897,11 +2281,18 @@ export default function Whiteboard({
       const r = area.getBoundingClientRect();
       const w = Math.max(1, r.width);
       const h = Math.max(1, r.height);
-      canvas.width = w * window.devicePixelRatio;
-      canvas.height = h * window.devicePixelRatio;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+      ctx.scale(dpr, dpr);
+      const laser = laserCanvasRef.current;
+      if (laser) {
+        laser.width = w * dpr;
+        laser.height = h * dpr;
+      }
       redrawCanvas(historyRef.current);
+      paintLaserOverlay();
     }
 
     resize();
@@ -1911,8 +2302,12 @@ export default function Whiteboard({
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", resize);
+      if (laserAnimRef.current) {
+        cancelAnimationFrame(laserAnimRef.current);
+        laserAnimRef.current = 0;
+      }
     };
-  }, [redrawCanvas]);
+  }, [redrawCanvas, paintLaserOverlay]);
 
   const getCanvasPos = (e) => {
     const canvas = canvasRef.current;
@@ -1939,7 +2334,7 @@ export default function Whiteboard({
   };
 
   const tryMovePointerDown = (e) => {
-    if (!drawPermission || currentTool !== "move") return;
+    if (!drawPermission || !isSelectionTool(currentTool)) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     e.preventDefault();
@@ -1953,6 +2348,22 @@ export default function Whiteboard({
 
     if (!gid) {
       setMoveDragPreview(null);
+      if (currentTool === "lasso" && lassoModeRef.current === "freehand") {
+        setMarqueeRect(null);
+        setLassoPath([{ x: pos.x, y: pos.y }]);
+        moveSessionRef.current = {
+          phase: "freehand-lasso",
+          points: [{ x: pos.x, y: pos.y }],
+          captured: false,
+        };
+        try {
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      setLassoPath(null);
       setMarqueeRect({ x: pos.x, y: pos.y, w: 0, h: 0 });
       moveSessionRef.current = {
         phase: "marquee",
@@ -2120,6 +2531,52 @@ export default function Whiteboard({
     }
   };
 
+  const tryFreehandLassoPointerMove = (e) => {
+    const sess = moveSessionRef.current;
+    if (!sess || sess.phase !== "freehand-lasso") return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    e.preventDefault();
+    const pos = getCanvasPos(e);
+    const last = sess.points[sess.points.length - 1];
+    if (last && Math.hypot(pos.x - last.x, pos.y - last.y) < 1.5) return;
+    sess.points.push({ x: pos.x, y: pos.y });
+    sess.captured = true;
+    setLassoPath([...sess.points]);
+  };
+
+  const tryFreehandLassoPointerUp = (e) => {
+    const sess = moveSessionRef.current;
+    const canvas = canvasRef.current;
+    if (!sess || sess.phase !== "freehand-lasso") return;
+    e.preventDefault();
+    if (sess.captured) {
+      try {
+        canvas?.releasePointerCapture?.(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+    moveSessionRef.current = null;
+    const points = sess.points || [];
+    setLassoPath(null);
+    if (points.length < 3) {
+      if (!e.shiftKey) setMoveSelection([]);
+      return;
+    }
+    const visible = strokesVisibleOnPage(
+      historyRef.current,
+      activePageIdRef.current,
+      canvasPagesRef.current
+    );
+    const ids = collectGroupIdsInFreehandLasso(visible, points);
+    if (e.shiftKey) {
+      setMoveSelection((prev) => [...new Set([...prev, ...ids])]);
+    } else {
+      setMoveSelection(ids);
+    }
+  };
+
   const tryMarqueePointerMove = (e) => {
     const sess = moveSessionRef.current;
     if (!sess || sess.phase !== "marquee") return;
@@ -2211,7 +2668,7 @@ export default function Whiteboard({
       });
       return;
     }
-    if (currentTool === "move") {
+    if (currentTool === "lasso" || currentTool === "move") {
       tryMovePointerDown(e);
       return;
     }
@@ -2222,6 +2679,10 @@ export default function Whiteboard({
     const ms = moveSessionRef.current;
     if (ms?.phase === "marquee") {
       tryMarqueePointerMove(e);
+      return;
+    }
+    if (ms?.phase === "freehand-lasso") {
+      tryFreehandLassoPointerMove(e);
       return;
     }
     if (ms?.phase === "pending" || ms?.phase === "dragging") {
@@ -2235,6 +2696,10 @@ export default function Whiteboard({
     const ms = moveSessionRef.current;
     if (ms?.phase === "marquee") {
       tryMarqueePointerUp(e);
+      return;
+    }
+    if (ms?.phase === "freehand-lasso") {
+      tryFreehandLassoPointerUp(e);
       return;
     }
     if (ms?.phase === "pending" || ms?.phase === "dragging") {
@@ -2252,9 +2717,14 @@ export default function Whiteboard({
       setMoveDragPreview(null);
       return;
     }
+    if (ms?.phase === "freehand-lasso") {
+      tryFreehandLassoPointerUp(e);
+      return;
+    }
     if (ms?.phase === "marquee") {
       moveSessionRef.current = null;
       setMarqueeRect(null);
+      setLassoPath(null);
       setMoveDragPreview(null);
       return;
     }
@@ -2293,11 +2763,39 @@ export default function Whiteboard({
 
   const startDrawing = (e) => {
     if (!drawPermission) return;
-    if (currentTool === "move") return;
+    if (isSelectionTool(currentTool)) return;
     e.preventDefault();
     const pos = getCanvasPos(e);
     setLastPos(pos);
     setIsDrawing(true);
+
+    if (currentTool === "laser") {
+      const strokeId =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `laser-${Date.now()}`;
+      activeLaserIdRef.current = strokeId;
+      const pageId =
+        activePageIdRef.current || canvasPagesRef.current[0]?.id || undefined;
+      const color = currentColor || LASER_DEFAULT_COLOR;
+      const size = Math.max(3, currentSize);
+      const mode = laserModeRef.current === "dot" ? "dot" : "line";
+      const payload = {
+        strokeId,
+        mode,
+        color,
+        size,
+        pageId,
+        action: "start",
+        fromX: pos.x,
+        fromY: pos.y,
+        toX: pos.x,
+        toY: pos.y,
+      };
+      upsertLaserStroke(payload);
+      emitLaser(payload);
+      return;
+    }
 
     if (SHAPE_TOOL_TYPES.includes(currentTool)) {
       setShapeStart(pos);
@@ -2309,13 +2807,22 @@ export default function Whiteboard({
         ctx.globalCompositeOperation = "destination-out";
         ctx.strokeStyle = "rgba(0,0,0,1)";
         ctx.lineWidth = eraserSize;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+      } else if (isFreestylePenTool(currentTool)) {
+        applyFreestylePenCtx(
+          ctx,
+          penStyleForTool(currentTool),
+          currentColor,
+          currentSize
+        );
       } else {
         ctx.globalCompositeOperation = "source-over";
         ctx.strokeStyle = currentColor;
         ctx.lineWidth = currentSize;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
       }
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
       ctx.beginPath();
       ctx.moveTo(pos.x, pos.y);
     }
@@ -2334,8 +2841,36 @@ export default function Whiteboard({
     emitCursorFromEvent(e);
     const pos = getCanvasPos(e);
 
-    if (!isDrawing || !canvasRef.current || !drawPermission) return;
+    if (!isDrawing || !drawPermission) return;
     e.preventDefault();
+
+    if (currentTool === "laser") {
+      const strokeId = activeLaserIdRef.current;
+      if (!strokeId) return;
+      const pageId =
+        activePageIdRef.current || canvasPagesRef.current[0]?.id || undefined;
+      const color = currentColor || LASER_DEFAULT_COLOR;
+      const size = Math.max(3, currentSize);
+      const mode = laserModeRef.current === "dot" ? "dot" : "line";
+      const payload = {
+        strokeId,
+        mode,
+        color,
+        size,
+        pageId,
+        action: "move",
+        fromX: lastPos.x,
+        fromY: lastPos.y,
+        toX: pos.x,
+        toY: pos.y,
+      };
+      upsertLaserStroke(payload);
+      emitLaser(payload);
+      setLastPos(pos);
+      return;
+    }
+
+    if (!canvasRef.current) return;
     const ctx = canvasRef.current.getContext("2d");
 
     if (SHAPE_TOOL_TYPES.includes(currentTool)) {
@@ -2362,13 +2897,22 @@ export default function Whiteboard({
       ctx.globalCompositeOperation = "destination-out";
       ctx.strokeStyle = "rgba(0,0,0,1)";
       ctx.lineWidth = eraserSize;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+    } else if (isFreestylePenTool(currentTool)) {
+      applyFreestylePenCtx(
+        ctx,
+        penStyleForTool(currentTool),
+        currentColor,
+        currentSize
+      );
     } else {
       ctx.globalCompositeOperation = "source-over";
       ctx.strokeStyle = currentColor;
       ctx.lineWidth = currentSize;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
     }
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
 
     if (Math.hypot(pos.x - lastPos.x, pos.y - lastPos.y) > 0.12) {
       freestyleMovedRef.current = true;
@@ -2392,6 +2936,9 @@ export default function Whiteboard({
       groupId: activePenGroupRef.current,
       pageId:
         activePageIdRef.current || canvasPagesRef.current[0]?.id || undefined,
+      ...(isFreestylePenTool(currentTool)
+        ? { penStyle: penStyleForTool(currentTool) }
+        : {}),
     };
     setHistory((prev) => [...prev, data]);
     if (socket && socket.connected) socket.emit(eventType, data);
@@ -2401,9 +2948,42 @@ export default function Whiteboard({
   const stopDrawing = (e) => {
     if (!isDrawing) return;
     e.preventDefault();
+    if (!drawPermission) {
+      setIsDrawing(false);
+      setShapeStart(null);
+      activeLaserIdRef.current = null;
+      activePenGroupRef.current = null;
+      redrawCanvas(historyRef.current);
+      return;
+    }
     setIsDrawing(false);
-    const ctx = canvasRef.current.getContext("2d");
     const pos = getCanvasPos(e);
+
+    if (currentTool === "laser") {
+      const strokeId = activeLaserIdRef.current;
+      if (strokeId) {
+        const pageId =
+          activePageIdRef.current || canvasPagesRef.current[0]?.id || undefined;
+        const payload = {
+          strokeId,
+          mode: laserModeRef.current === "dot" ? "dot" : "line",
+          color: currentColor || LASER_DEFAULT_COLOR,
+          size: Math.max(3, currentSize),
+          pageId,
+          action: "end",
+          fromX: pos.x,
+          fromY: pos.y,
+          toX: pos.x,
+          toY: pos.y,
+        };
+        upsertLaserStroke(payload, { startFade: true });
+        emitLaser(payload);
+      }
+      activeLaserIdRef.current = null;
+      return;
+    }
+
+    const ctx = canvasRef.current.getContext("2d");
 
     if (shapeStart && SHAPE_TOOL_TYPES.includes(currentTool)) {
       const shapeData = {
@@ -2428,7 +3008,7 @@ export default function Whiteboard({
       setShapeStart(null);
     } else if (
       !shapeStart &&
-      (currentTool === "pen" || currentTool === "eraser")
+      (isFreestylePenTool(currentTool) || currentTool === "eraser")
     ) {
       if (!freestyleMovedRef.current) {
         const x = lastPos.x;
@@ -2458,11 +3038,18 @@ export default function Whiteboard({
           setHistory((prev) => [...prev, dotErase]);
           if (socket && socket.connected) socket.emit("erase", dotErase);
         } else {
-          ctx.globalCompositeOperation = "source-over";
-          ctx.fillStyle = currentColor;
-          ctx.beginPath();
-          ctx.arc(x, y, Math.max(0.5, currentSize / 2), 0, Math.PI * 2);
-          ctx.fill();
+          const penStyle = penStyleForTool(currentTool);
+          drawFreestyleInk(ctx, {
+            type: "draw",
+            fromX: x,
+            fromY: y,
+            toX: x,
+            toY: y,
+            color: currentColor,
+            size: currentSize,
+            penStyle,
+            dot: true,
+          });
           const dotDraw = {
             type: "draw",
             fromX: x,
@@ -2472,6 +3059,7 @@ export default function Whiteboard({
             color: currentColor,
             size: currentSize,
             eraserSize,
+            penStyle,
             dot: true,
             groupId: activePenGroupRef.current,
             pageId:
@@ -2510,7 +3098,7 @@ export default function Whiteboard({
 
   const deleteMoveSelectionRef = useRef(() => {});
   deleteMoveSelectionRef.current = () => {
-    if (!drawPermission || currentTool !== "move") return;
+    if (!drawPermission || !isSelectionTool(currentTool)) return;
     const ids = [...moveSelectionRef.current];
     if (ids.length === 0) return;
     moveSessionRef.current = null;
@@ -2871,7 +3459,8 @@ export default function Whiteboard({
       if (
         (e.key === "Delete" || e.key === "Backspace") &&
         drawPermission &&
-        currentToolRef.current === "move" &&
+        currentToolRef.current &&
+        isSelectionTool(currentToolRef.current) &&
         moveSelectionRef.current.length > 0
       ) {
         e.preventDefault();
@@ -2891,8 +3480,11 @@ export default function Whiteboard({
         return;
       }
       if (k === "p") setCurrentTool("pen");
+      if (k === "h") setCurrentTool("highlighter");
+      if (k === "y") setCurrentTool("tape");
+      if (k === "k") setCurrentTool("laser");
       if (k === "e") setCurrentTool("eraser");
-      if (k === "v") setCurrentTool("move");
+      if (k === "v") setCurrentTool("lasso");
       if (k === "i") setCurrentTool("text");
       if (k === "l") setCurrentTool("line");
       if (k === "r") setCurrentTool("rectangle");
@@ -2910,6 +3502,41 @@ export default function Whiteboard({
 
   const drawTools = shapeOptions.filter((o) => o.group === "draw");
   const shapeTools = shapeOptions.filter((o) => o.group === "shapes");
+
+  const handleDrawToolClick = useCallback((value) => {
+    if (value === "ink") {
+      if (!isFreestylePenTool(currentTool)) {
+        setCurrentTool("pen");
+      }
+      setToolPopup((prev) => (prev === "ink" ? null : "ink"));
+      return;
+    }
+    const kind = toolPopupKind(value);
+    if (kind) {
+      setCurrentTool(value);
+      setToolPopup((prev) => (prev === kind ? null : kind));
+      return;
+    }
+    setCurrentTool(value);
+    setToolPopup(null);
+  }, [currentTool]);
+
+  const pickInkTool = useCallback((value) => {
+    setCurrentTool(value);
+    setToolPopup(null);
+  }, []);
+
+  const pickLaserMode = useCallback((mode) => {
+    setLaserMode(mode);
+    setCurrentTool("laser");
+    setToolPopup(null);
+  }, []);
+
+  const pickLassoMode = useCallback((mode) => {
+    setLassoMode(mode);
+    setCurrentTool("lasso");
+    setToolPopup(null);
+  }, []);
 
   const onlineShort = `${userCount} online`;
 
@@ -2977,7 +3604,7 @@ export default function Whiteboard({
   }, [canvasPages, activePageId]);
 
   const selectedImageForPanel = useMemo(() => {
-    if (currentTool !== "move" || moveSelection.length !== 1) return null;
+    if (!isSelectionTool(currentTool) || moveSelection.length !== 1) return null;
     const gid = moveSelection[0];
     return (
       strokesOnActiveCanvas.find(
@@ -2987,7 +3614,7 @@ export default function Whiteboard({
   }, [currentTool, moveSelection, strokesOnActiveCanvas]);
 
   const moveSelectionOutline = useMemo(() => {
-    if (currentTool !== "move" || moveSelection.length === 0) return null;
+    if (!isSelectionTool(currentTool) || moveSelection.length === 0) return null;
     if (marqueeRect != null) return null;
     const base = unionBoundsForGroups(strokesOnActiveCanvas, moveSelection);
     if (!base) return null;
@@ -3237,25 +3864,27 @@ export default function Whiteboard({
             </button>
           )}
           <ThemeToggleButton />
-          <button
-            type="button"
-            onClick={() => {
-              setAgentOpen((open) => {
-                const next = !open;
-                if (next) setPeopleOpen(false);
-                return next;
-              });
-            }}
-            title="Ask agent (local Ollama)"
-            aria-label="Ask agent"
-            aria-expanded={agentOpen}
-            className={`cq-btn-ghost cq-transition inline-flex min-w-0 items-center gap-1.5 px-2 ${
-              agentOpen ? "border-cq-accent text-[var(--cq-selected-text)]" : ""
-            }`}
-          >
-            <IconAskAgentNav className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">Ask agent</span>
-          </button>
+          {SHOW_ASK_AGENT && (
+            <button
+              type="button"
+              onClick={() => {
+                setAgentOpen((open) => {
+                  const next = !open;
+                  if (next) setPeopleOpen(false);
+                  return next;
+                });
+              }}
+              title="Ask agent (local Ollama)"
+              aria-label="Ask agent"
+              aria-expanded={agentOpen}
+              className={`cq-btn-ghost cq-transition inline-flex min-w-0 items-center gap-1.5 px-2 ${
+                agentOpen ? "border-cq-accent text-[var(--cq-selected-text)]" : ""
+              }`}
+            >
+              <IconAskAgentNav className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Ask agent</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -3331,50 +3960,225 @@ export default function Whiteboard({
               <p className="text-[11px] text-cq-warn">View-only — drawing is disabled.</p>
             )}
 
-            <div className="cq-tool-well p-2">
+            <div ref={drawWellRef} className="cq-tool-well relative p-2">
               <p className="mb-1.5 text-[9px] font-medium uppercase tracking-wider text-cq-faint">
                 Draw
               </p>
               <div className="flex flex-wrap gap-1">
-                {drawTools.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    title={TOOL_HINTS[opt.value] || opt.label}
-                    aria-label={TOOL_HINTS[opt.value] || opt.label}
-                    onClick={() => setCurrentTool(opt.value)}
-                    className={`cq-transition flex h-9 min-w-0 flex-1 items-center justify-center rounded-cq border ${
-                      currentTool === opt.value
-                        ? "border-cq-accent bg-[var(--cq-selected-bg)] text-[var(--cq-selected-text)] shadow-cq-sm"
-                        : "border-transparent text-cq-muted hover:bg-cq-raised"
-                    }`}
-                  >
-                    {opt.value === "text" ? (
-                      <span className="select-none text-[10px] font-semibold leading-none tracking-tight">
-                        Text
-                      </span>
-                    ) : (
-                      <ToolRailIcon
-                        tool={opt.value}
-                        className="h-[14px] w-[14px] shrink-0"
-                      />
-                    )}
-                  </button>
-                ))}
+                {drawTools.map((opt) => {
+                  const inkActive =
+                    opt.value === "ink" && isFreestylePenTool(currentTool);
+                  const active =
+                    inkActive ||
+                    currentTool === opt.value ||
+                    (opt.value === "ink" && toolPopup === "ink");
+                  const railTool = opt.value === "ink" ? "pen" : opt.value;
+                  const inkVariant =
+                    opt.value === "ink" && isFreestylePenTool(currentTool)
+                      ? currentTool
+                      : null;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      title={
+                        inkVariant
+                          ? `Pen — ${INK_VARIANT_LABEL[inkVariant]}`
+                          : TOOL_HINTS[opt.value] || opt.label
+                      }
+                      aria-label={
+                        inkVariant
+                          ? `Pen — ${INK_VARIANT_LABEL[inkVariant]}`
+                          : TOOL_HINTS[opt.value] || opt.label
+                      }
+                      aria-expanded={
+                        toolPopupKind(opt.value)
+                          ? toolPopup === toolPopupKind(opt.value)
+                          : undefined
+                      }
+                      onClick={() => handleDrawToolClick(opt.value)}
+                      className={`cq-transition relative flex h-10 min-w-0 flex-1 items-center justify-center rounded-cq border ${
+                        active
+                          ? "border-cq-accent bg-[var(--cq-selected-bg)] text-[var(--cq-selected-text)] shadow-cq-sm"
+                          : "border-transparent text-cq-muted hover:bg-cq-raised"
+                      }`}
+                    >
+                      {opt.value === "text" ? (
+                        <span className="select-none text-[11px] font-semibold leading-none tracking-tight">
+                          Text
+                        </span>
+                      ) : (
+                        <>
+                          <ToolRailIcon
+                            tool={railTool}
+                            className={DRAW_TOOL_ICON_CLASS}
+                          />
+                          {inkVariant && (
+                            <span
+                              className="pointer-events-none absolute -right-0.5 -top-0.5 flex h-3.5 min-w-[0.875rem] items-center justify-center rounded-full bg-red-500 px-0.5 text-[8px] font-bold leading-none text-white shadow-[0_0_0_1.5px_var(--cq-surface)]"
+                              aria-hidden
+                            >
+                              {INK_VARIANT_BADGE[inkVariant]}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </button>
+                  );
+                })}
                 {drawPermission &&
-                  currentTool === "move" &&
+                  isSelectionTool(currentTool) &&
                   moveSelection.length > 0 && (
                     <button
                       type="button"
                       title="Delete selection — Delete or Backspace"
                       aria-label="Delete selection"
                       onClick={() => deleteMoveSelectionRef.current()}
-                      className="cq-transition flex h-9 min-w-[2.25rem] shrink-0 items-center justify-center rounded-cq border border-cq-border bg-cq-surface-soft text-[var(--cq-danger)] hover:border-[var(--cq-danger)] hover:bg-[color-mix(in_srgb,var(--cq-danger)_10%,transparent)]"
+                      className="cq-transition flex h-10 min-w-[2.5rem] shrink-0 items-center justify-center rounded-cq border border-cq-border bg-cq-surface-soft text-[var(--cq-danger)] hover:border-[var(--cq-danger)] hover:bg-[color-mix(in_srgb,var(--cq-danger)_10%,transparent)]"
                     >
-                      <IconTrash className="h-[15px] w-[15px] shrink-0" />
+                      <IconTrash className={`${DRAW_TOOL_ICON_CLASS} text-[var(--cq-danger)]`} />
                     </button>
                   )}
               </div>
+
+              {toolPopup === "ink" && (
+                <div
+                  role="menu"
+                  className="absolute left-2 right-2 top-full z-30 mt-1 rounded-cq-lg border border-cq-border bg-cq-surface p-2 shadow-cq-md"
+                >
+                  <p className="mb-1.5 text-[9px] font-medium uppercase tracking-wider text-cq-faint">
+                    Ink
+                  </p>
+                  <div className="grid grid-cols-3 gap-1">
+                    {[
+                      { value: "pen", label: "Fountain pen", hint: "Smooth ink" },
+                      { value: "highlighter", label: "Highlighter", hint: "Semi-transparent" },
+                      { value: "tape", label: "Tape", hint: "Covers ink" },
+                    ].map((item) => (
+                      <button
+                        key={item.value}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => pickInkTool(item.value)}
+                        className={`cq-transition flex flex-col items-center gap-1 rounded-cq border px-1.5 py-2 ${
+                          currentTool === item.value
+                            ? "border-cq-accent bg-[var(--cq-selected-bg)] text-[var(--cq-selected-text)] shadow-cq-sm"
+                            : "border-cq-border text-cq-muted hover:bg-cq-raised"
+                        }`}
+                      >
+                        <ToolRailIcon tool={item.value} className={DRAW_POPUP_ICON_CLASS} />
+                        <span className="text-[9px] font-medium leading-tight text-center">
+                          {item.label}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1.5 text-[10px] leading-snug text-cq-faint text-center">
+                    {isFreestylePenTool(currentTool)
+                      ? currentTool === "pen"
+                        ? "Smooth ink stroke"
+                        : currentTool === "highlighter"
+                        ? "Semi-transparent"
+                        : "Covers ink"
+                      : "Choose an ink type"}
+                  </p>
+                </div>
+              )}
+
+              {toolPopup === "laser" && (
+                <div
+                  role="menu"
+                  className="absolute left-2 right-2 top-full z-30 mt-1 rounded-cq-lg border border-cq-border bg-cq-surface p-2 shadow-cq-md"
+                >
+                  <p className="mb-1.5 text-[9px] font-medium uppercase tracking-wider text-cq-faint">
+                    Laser pointer
+                  </p>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      title="Dot — glowing point"
+                      aria-label="Laser dot"
+                      onClick={() => pickLaserMode("dot")}
+                      className={`cq-transition flex flex-col items-center gap-1 rounded-cq border px-2 py-2 ${
+                        laserMode === "dot"
+                          ? "border-cq-accent bg-[var(--cq-selected-bg)] text-[var(--cq-selected-text)] shadow-cq-sm"
+                          : "border-cq-border text-cq-muted hover:bg-cq-raised"
+                      }`}
+                    >
+                      <IconLaserDotPreview />
+                      <span className="text-[10px] font-medium">Dot</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      title="Line — temporary trail"
+                      aria-label="Laser line"
+                      onClick={() => pickLaserMode("line")}
+                      className={`cq-transition flex flex-col items-center gap-1 rounded-cq border px-2 py-2 ${
+                        laserMode === "line"
+                          ? "border-cq-accent bg-[var(--cq-selected-bg)] text-[var(--cq-selected-text)] shadow-cq-sm"
+                          : "border-cq-border text-cq-muted hover:bg-cq-raised"
+                      }`}
+                    >
+                      <IconLaserLinePreview />
+                      <span className="text-[10px] font-medium">Line</span>
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-[10px] leading-snug text-cq-faint">
+                    Temporary — disappears after 1 second. Not saved to the board.
+                  </p>
+                </div>
+              )}
+
+              {toolPopup === "lasso" && (
+                <div
+                  role="menu"
+                  className="absolute left-2 right-2 top-full z-30 mt-1 rounded-cq-lg border border-cq-border bg-cq-surface p-2 shadow-cq-md"
+                >
+                  <p className="mb-1.5 text-[9px] font-medium uppercase tracking-wider text-cq-faint">
+                    Lasso
+                  </p>
+                  <div className="grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      title="Freehand loop around objects"
+                      aria-label="Freehand lasso"
+                      onClick={() => pickLassoMode("freehand")}
+                      className={`cq-transition flex flex-col items-center gap-1 rounded-cq border px-2 py-2 ${
+                        lassoMode === "freehand"
+                          ? "border-cq-accent bg-[var(--cq-selected-bg)] text-[var(--cq-selected-text)] shadow-cq-sm"
+                          : "border-cq-border text-cq-muted hover:bg-cq-raised"
+                      }`}
+                    >
+                      <ToolRailIcon tool="lasso" className={DRAW_POPUP_ICON_CLASS} />
+                      <span className="text-[10px] font-medium">Freehand</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      title="Rectangular marquee"
+                      aria-label="Rectangular lasso"
+                      onClick={() => pickLassoMode("rect")}
+                      className={`cq-transition flex flex-col items-center gap-1 rounded-cq border px-2 py-2 ${
+                        lassoMode === "rect"
+                          ? "border-cq-accent bg-[var(--cq-selected-bg)] text-[var(--cq-selected-text)] shadow-cq-sm"
+                          : "border-cq-border text-cq-muted hover:bg-cq-raised"
+                      }`}
+                    >
+                      <span
+                        className="h-5 w-6 rounded-sm border border-dashed border-current opacity-80"
+                        aria-hidden
+                      />
+                      <span className="text-[10px] font-medium">Rectangle</span>
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-[10px] leading-snug text-cq-faint">
+                    Draw a loop or box to select. Drag selection to move.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="cq-tool-well p-2">
@@ -3388,7 +4192,10 @@ export default function Whiteboard({
                     type="button"
                     title={TOOL_HINTS[opt.value] || opt.label}
                     aria-label={TOOL_HINTS[opt.value] || opt.label}
-                    onClick={() => setCurrentTool(opt.value)}
+                    onClick={() => {
+                      setCurrentTool(opt.value);
+                      setToolPopup(null);
+                    }}
                     className={`cq-transition flex h-9 items-center justify-center rounded-cq border ${
                       currentTool === opt.value
                         ? "border-cq-accent bg-[var(--cq-selected-bg)] text-[var(--cq-selected-text)] shadow-cq-sm"
@@ -3579,7 +4386,13 @@ export default function Whiteboard({
 
             <div className="cq-tool-well p-2">
               <p className="mb-1 text-[9px] font-medium uppercase tracking-wider text-cq-faint">
-                Size ({currentTool === "eraser" ? eraserSize : currentSize}px)
+                Size (
+                {currentTool === "eraser"
+                  ? eraserSize
+                  : isFreestylePenTool(currentTool)
+                  ? effectivePenWidth(penStyleForTool(currentTool), currentSize)
+                  : currentSize}
+                px)
               </p>
               <input
                 type="range"
@@ -3589,16 +4402,12 @@ export default function Whiteboard({
                 title="Size"
                 aria-label="Size"
                 value={
-                  currentTool === "pen"
-                    ? currentSize
-                    : currentTool === "eraser"
+                  currentTool === "eraser"
                     ? eraserSize
                     : currentSize
                 }
                 onChange={(e) =>
-                  currentTool === "pen"
-                    ? setCurrentSize(+e.target.value)
-                    : currentTool === "eraser"
+                  currentTool === "eraser"
                     ? setEraserSize(+e.target.value)
                     : setCurrentSize(+e.target.value)
                 }
@@ -3616,7 +4425,24 @@ export default function Whiteboard({
               ref={canvasAreaRef}
               className="cq-canvas-frame relative min-h-[280px] flex-1 overflow-hidden"
             >
-              {currentTool === "move" &&
+              {isSelectionTool(currentTool) &&
+                lassoPath != null &&
+                lassoPath.length > 1 && (
+                  <svg
+                    className="pointer-events-none absolute inset-0 z-[5] h-full w-full overflow-visible"
+                    aria-hidden
+                  >
+                    <polygon
+                      points={lassoPath.map((p) => `${p.x},${p.y}`).join(" ")}
+                      fill="color-mix(in srgb, var(--cq-accent) 14%, transparent)"
+                      stroke="var(--cq-accent)"
+                      strokeWidth="2"
+                      strokeDasharray="6 4"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
+              {isSelectionTool(currentTool) &&
                 marqueeRect != null &&
                 (marqueeRect.w > 0.5 || marqueeRect.h > 0.5) && (
                   <div
@@ -3630,7 +4456,7 @@ export default function Whiteboard({
                     aria-hidden
                   />
                 )}
-              {currentTool === "move" && moveSelectionOutline && (
+              {isSelectionTool(currentTool) && moveSelectionOutline && (
                 <div
                   className="pointer-events-none absolute z-[7] rounded-sm border-2 border-dotted border-[var(--cq-accent)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--cq-canvas-shell-bg)_70%,transparent)]"
                   style={{
@@ -3660,14 +4486,16 @@ export default function Whiteboard({
                 className={`absolute inset-0 block h-full w-full touch-none ${
                   !drawPermission
                     ? "cursor-not-allowed opacity-90"
-                    : currentTool === "move"
+                    : isSelectionTool(currentTool)
                     ? moveDragging
                       ? "cursor-grabbing"
-                      : marqueeRect != null
+                      : marqueeRect != null || lassoPath != null
                       ? "cursor-crosshair"
                       : "cursor-grab"
                     : currentTool === "text"
                     ? "cursor-text"
+                    : currentTool === "laser"
+                    ? "cursor-cell"
                     : "cq-canvas-cursor-draw"
                 }`}
                 width={1200}
@@ -3683,6 +4511,12 @@ export default function Whiteboard({
                   touchAction: "none",
                   background: "transparent",
                 }}
+              />
+
+              <canvas
+                ref={laserCanvasRef}
+                className="pointer-events-none absolute inset-0 z-[4] block h-full w-full"
+                aria-hidden
               />
               {textComposer &&
                 textComposer.pageId === activePageId &&
@@ -3750,7 +4584,7 @@ export default function Whiteboard({
             </div>
           </div>
 
-          {agentOpen && (
+          {SHOW_ASK_AGENT && agentOpen && (
             <AskAgentSidebar
               roomId={roomId}
               displayName={displayName}
